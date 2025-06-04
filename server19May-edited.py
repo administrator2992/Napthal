@@ -1,3 +1,4 @@
+
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import os
@@ -10,7 +11,6 @@ import sys
 import platform
 import ctypes
 import time
-import signal
 
 # Buat Variable I, J, V
 for i in range(100):
@@ -34,9 +34,6 @@ for i in range(100, 192):
 
 threads = []
 changed_keys = []
-updated_queue = []
-updated_var_names = []
-autohistory = []
 
 arrIntAuto = [False] * 28
 timers = {}
@@ -147,7 +144,7 @@ V0064 = 6
 V0065 = 6
 
 V0015 = 6
-V0148 = 0
+
 
 
 # Timer Line B
@@ -227,7 +224,7 @@ globals()['I00032'] = True
 globals()['V0149'] = True
 
 # MongoDB Setting
-client = MongoClient('mongodb://192.168.18.149:27017/')
+client = MongoClient('mongodb://192.168.80.80:27017/')
 # client = MongoClient('mongodb://localhost:27017/')
 db_mongo = client['unitamaDB']
 collection = db_mongo['napthalMachine']
@@ -235,66 +232,10 @@ objID = '68366b8cde0dc02539587580'
 
 doc_antrian = collection.insert_one({})
 
-def JQueue():
-    return (
-        [globals()[f"J{8 * group + offset:05d}"] for offset in range(8)]
-        for group in range(16, 72)
-    )
-
-previous_jqueues = [jqueue[:] for jqueue in JQueue()]
-
-def processQueue():
-    updated_queue = []
-    updated_var_names = []
-
-    for jqueue_index, current_jqueue in enumerate(JQueue()):
-        prev_jqueue = previous_jqueues[jqueue_index]
-        for bit_index, (prev_val, curr_val) in enumerate(zip(prev_jqueue, current_jqueue)):
-            if prev_val != curr_val:
-                updated_queue.append((jqueue_index, bit_index))
-                jqueue_index_real = 16 + jqueue_index
-                global_index = 8 * jqueue_index_real + bit_index
-                var_name = f"J{global_index:05d}"
-                updated_var_names.append(var_name)
-
-                previous_jqueues[jqueue_index][bit_index] = curr_val
-
-    return updated_queue, updated_var_names
-
-def updateProcess(updated_queue: list):
-    if not updated_queue:
-        return
-
-    # Group changes by their queue index
-    changed_groups = set()
-    for group_idx, _ in updated_queue:
-        changed_groups.add(group_idx)
-
-    # Build dictionary of full byte values for changed groups
-    packed_list = {}
-    current_queues = list(JQueue())  # Get current state of all groups
-    
-    for group_idx in changed_groups:
-        # Calculate the full byte value (0-255) for this group
-        byte_value = 0
-        for bit_idx, bit_val in enumerate(current_queues[group_idx]):
-            if bit_val:
-                byte_value |= (1 << bit_idx)  # Set bit if True
-                
-        # Key format: "qj{GROUP_NUMBER:04d}latchv" (GROUP_NUMBER = group_idx + 16)
-        qi_key = f"qj{group_idx + 16:04d}latchv"
-        packed_list[qi_key] = byte_value
-
-    # Update database
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': packed_list}
-    )
-
-
 def unpack_inputs(packed_inputs: dict) -> dict:
     global changed_keys
     # Unpack 8 bits per byte to Ixxxxx keys
+    inputs = {}
     for j in range(16):
         qi_key = f"qi{str(j).zfill(4)}glovar"
         if qi_key not in packed_inputs.keys():
@@ -313,7 +254,7 @@ def unpack_inputs(packed_inputs: dict) -> dict:
 
     # Add corresponding Jxxxxx values
     j_to_i_map = {
-        "J00543": "I00031",
+        'J00543': 'I00031',
         "J00521": "I00012",
         "J00520": "I00011",
         "J00517": "I00003",
@@ -416,8 +357,25 @@ def MoveCtrlLogic(in1,in2,in3,in4,in5,in6,in7,in8,in9,in10):
         }
     return output
 
+def OpenLogic(in1,in2,in3,in4,in5,in6):
+    value1 = bool(in1 and not in2 and not in3 and ((bool(in4) and in5) or (not bool(in4) and in6)))
+    output = {
+        'out1' : value1
+    }
+    return output
+
 def frame6and2or4and(a, b, c, d, e, f, g, h):
     return bool(a and not b and not c and ((bool(d) and e) or (not bool(d) and f)) and not g and not h)
+
+def OpenCloseLogic(in1,in2,in3,in4,in5,in6,in7,in8,in9,in10,in11,in12):
+    value1 = bool(in1 and not in2 and not in3 and ((bool(in4) and in5) or (not bool(in4) and in6)) and not in7 and not in8)
+    value2 = bool(in1 and not in2 and not in3 and ((bool(in4) and in9) or (not bool(in4) and in10)) and not in11 and not in12)
+    # value1 = bool(in1 and not in2 and not in3 and ((bool(in4) and in5) or (not bool(in4) and in6)) and not value2 and not in8)
+    output = {
+        'out1' : value1,
+        'out2' : value2
+    }
+    return output
 
 def frameTimer2or2and2and(a, b, c, d):
     return bool((not a and b) or (not c and d))
@@ -453,11 +411,11 @@ class MoveChecker:
         else:
             globals()[self.k] = False
         globals()[self.out1] = self.logic()
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         self.out1: bool(globals()[self.out1])
-        # }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                self.out1: bool(globals()[self.out1])
+        }})
 
     def logic(self):
         bool(globals()[self.in1] or (not globals()[self.k] and globals()[self.out1]))
@@ -469,51 +427,6 @@ class MoveChecker:
             globals()[self.v] = round(time.time() - globals()[self.u])
 
         globals()[self.k] = True
-
-class AutoSelectorB:
-    def __init__(self):
-        global autohistory
-
-        self.not_faultmotors = not bool(globals()['J00517'] or globals()['J00518'] or globals()['J00519'] or globals()['J00520'] or globals()['J00521'] or globals()['J00522'])
-        self.condition1 = bool(globals()['I00032'] and not globals()['J00543'] and self.not_faultmotors and not globals()['J00513'])
-        self.condition2 = bool(globals()['I00032'] and not globals()['J00543'] and self.not_faultmotors and not globals()['J00514'])
-        self.condition3 = bool(globals()['I00032'] and not globals()['J00543'] and not (globals()['J00515'] or globals()['J00523']) and not globals()['J00513'])
-        self.condition4 = bool(globals()['I00032'] and not globals()['J00543'] and not (globals()['J00515'] or globals()['J00523']) and not globals()['J00514'])
-
-        if [self.condition1, self.condition2, self.condition3, self.condition4] != autohistory:
-            autohistory.clear()
-            autohistory.extend([self.condition1, self.condition2, self.condition3, self.condition4])
-
-            if (globals()['V0148'] & 32768) and not self.condition1:
-                globals()['V0148'] &= ~32768
-            elif not (globals()['V0148'] & 32768) and self.condition1:
-                globals()['V0148'] |= 32768
-            if (globals()['V0148'] & 16384) and not self.condition2:
-                globals()['V0148'] &= ~16384
-            elif not (globals()['V0148'] & 16384) and self.condition2:
-                globals()['V0148'] |= 16384
-            if (globals()['V0148'] & 8192) and not self.condition2:
-                globals()['V0148'] &= ~8192
-            elif not (globals()['V0148'] & 8192) and self.condition2:
-                globals()['V0148'] |= 8192
-            if (globals()['V0148'] & 4096) and not self.condition2:
-                globals()['V0148'] &= ~4096
-            elif not (globals()['V0148'] & 4096) and self.condition2:
-                globals()['V0148'] |= 4096
-            if (globals()['V0148'] & 2048) and not self.condition3:
-                globals()['V0148'] &= ~2048
-            elif not (globals()['V0148'] & 2048) and self.condition3:
-                globals()['V0148'] |= 2048
-            if (globals()['V0148'] & 1024) and not self.condition4:
-                globals()['V0148'] &= ~1024
-            elif not (globals()['V0148'] & 1024) and self.condition4:
-                globals()['V0148'] |= 1024
-
-            collection.update_one(
-                {'_id': ObjectId(objID)},
-                {'$set': {
-                    'V0148': globals()['V0148']
-                }})
 
 def BuzzerStop():
     print("BuzzerStop")
@@ -660,11 +573,11 @@ def timeup(name):
         case _:
             print("")
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         name: globals()[name]
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            name: globals()[name]
+        }})
     calculateV0157ToPanelAlarmErrorSourcesZ0err()
 
 # Fungsi untuk menghentikan timer
@@ -976,70 +889,70 @@ def stop_timer(name):
 #                     print(f"Error accessing updated fields: {e}")
 
 def setOutputToRLY():
-    # global I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139
-    # global I00140, I00141, I00142, I00143, I00144, I00145, I00146, I00147, I00148, I00149, I00150, I00151
-    # global I00152, I00153, I00154, I00155, I00156, I00157, I00158, I00159, I00160, I00161, I00162, I00163
-    # global I00164, I00165, I00166, I00167, I00168, I00169, I00170, I00171, I00172, I00173, I00174, I00175
-    # global I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139
-    # global I00140, I00141, I00142, I00143, I00192, I00193, I00194, I00195, I00196, I00197, I00198, I00199
-    # global I00200, I00201, I00202, I00203, I00204, I00205, I00206, I00207, I00208, I00209, I00210, I00211
-    # global I00212, I00213, I00214, I00215, I00216, I00217, I00218, I00219, I00220, I00221, I00222, I00223
-    # global I00224, I00225, I00226, I00227, I00228, I00229, I00230, I00231, I00232, I00233, I00234, I00235
-    # global I00236, I00237, I00238, I00239, I00240, I00241, I00242, I00243, I00244, I00245, I00246, I00247
-    # global I00248, I00249, I00250, I00251, I00252, I00253, I00254, I00255
+    global I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139
+    global I00140, I00141, I00142, I00143, I00144, I00145, I00146, I00147, I00148, I00149, I00150, I00151
+    global I00152, I00153, I00154, I00155, I00156, I00157, I00158, I00159, I00160, I00161, I00162, I00163
+    global I00164, I00165, I00166, I00167, I00168, I00169, I00170, I00171, I00172, I00173, I00174, I00175
+    global I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139
+    global I00140, I00141, I00142, I00143, I00192, I00193, I00194, I00195, I00196, I00197, I00198, I00199
+    global I00200, I00201, I00202, I00203, I00204, I00205, I00206, I00207, I00208, I00209, I00210, I00211
+    global I00212, I00213, I00214, I00215, I00216, I00217, I00218, I00219, I00220, I00221, I00222, I00223
+    global I00224, I00225, I00226, I00227, I00228, I00229, I00230, I00231, I00232, I00233, I00234, I00235
+    global I00236, I00237, I00238, I00239, I00240, I00241, I00242, I00243, I00244, I00245, I00246, I00247
+    global I00248, I00249, I00250, I00251, I00252, I00253, I00254, I00255
   
-    # arrayY = [
-    #             # globals()['I00228'], globals()['I00229'], globals()['I00231'], globals()['I00233'], globals()['I00235'], globals()['I00224'], globals()['I00225'], globals()['I00226'], globals()['I00227'], globals()['I00222'], globals()['I00223'], I00139,
-    #             I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139,
-    #             I00140, I00141, I00142, I00143, I00144, I00145, I00146, I00147, I00148, I00149, I00150, I00151,
-    #             I00152, I00153, I00154, I00155, I00156, I00157, I00158, I00159, I00160, I00161, I00162, I00163,
-    #             I00164, I00165, I00166, I00167, I00168, I00169, I00170, I00171, I00172, I00173, I00174, I00175,
-    #             I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139,
-    #             I00140, I00141, I00142, I00143, I00192, I00193, I00194, I00195, I00196, I00197, I00198, I00199, 
-    #             I00200, I00201, I00202, I00203, I00204, I00205, I00206, I00207, I00208, I00209, I00210, I00211, 
-    #             I00212, I00213, I00214, I00215, I00216, I00217, I00218, I00219, I00220, I00221, I00222, I00223,
-    #             I00224, I00225, I00226, I00227, I00228, I00229, I00230, I00231, I00232, I00233, I00234, I00235,
-    #             I00236, I00237, I00238, I00239, I00240, I00241, I00242, I00243, I00244, I00245, I00246, I00247,
-    #             I00248, I00249, I00250, I00251, I00252, I00253, I00254, I00255
-    #         ]
+    arrayY = [
+                # globals()['I00228'], globals()['I00229'], globals()['I00231'], globals()['I00233'], globals()['I00235'], globals()['I00224'], globals()['I00225'], globals()['I00226'], globals()['I00227'], globals()['I00222'], globals()['I00223'], I00139,
+                I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139,
+                I00140, I00141, I00142, I00143, I00144, I00145, I00146, I00147, I00148, I00149, I00150, I00151,
+                I00152, I00153, I00154, I00155, I00156, I00157, I00158, I00159, I00160, I00161, I00162, I00163,
+                I00164, I00165, I00166, I00167, I00168, I00169, I00170, I00171, I00172, I00173, I00174, I00175,
+                I00128, I00129, I00130, I00131, I00132, I00133, I00134, I00135, I00136, I00137, I00138, I00139,
+                I00140, I00141, I00142, I00143, I00192, I00193, I00194, I00195, I00196, I00197, I00198, I00199, 
+                I00200, I00201, I00202, I00203, I00204, I00205, I00206, I00207, I00208, I00209, I00210, I00211, 
+                I00212, I00213, I00214, I00215, I00216, I00217, I00218, I00219, I00220, I00221, I00222, I00223,
+                I00224, I00225, I00226, I00227, I00228, I00229, I00230, I00231, I00232, I00233, I00234, I00235,
+                I00236, I00237, I00238, I00239, I00240, I00241, I00242, I00243, I00244, I00245, I00246, I00247,
+                I00248, I00249, I00250, I00251, I00252, I00253, I00254, I00255
+            ]
 
-    # globals()['qy0000output'] = (ctypes.c_ubyte * 128)(*map(int, arrayY))
+#     globals()['qy0000output'] = (ctypes.c_ubyte * 128)(*map(int, arrayY))
 
-    # # resRLY = ydu.YduDioOutput(output_id, ctypes.byref(globals()['qy0000output']), 0, 128)
+#     # resRLY = ydu.YduDioOutput(output_id, ctypes.byref(globals()['qy0000output']), 0, 128)
 
 
-    # arrOuput0 = 0
-    # arrOuput1 = 0
-    # arrOuput2 = 0
-    # arrOuput3 = 0
+#     arrOuput0 = 0
+#     arrOuput1 = 0
+#     arrOuput2 = 0
+#     arrOuput3 = 0
     
-    # qy0000ouput = [
-    #     globals()['I00128'], globals()['I00129'], globals()['I00130'], globals()['I00131'], globals()['I00132'], globals()['I00133'], globals()['I00134'], globals()['I00135'], globals()['I00136'], globals()['I00137'], globals()['I00138'], globals()['I00139'],
-    #             globals()['I00140'], globals()['I00141'], globals()['I00142'], globals()['I00143'], #Ga kepakai
-    #             globals()['I00144'], globals()['I00145'], globals()['I00146'], globals()['I00147'], globals()['I00148'], globals()['I00149'], globals()['I00150'], globals()['I00151'], # Akhir Baris 1
-    #             globals()['I00152'], globals()['I00153'], globals()['I00154'], globals()['I00155'], globals()['I00156'], globals()['I00157'], globals()['I00158'], globals()['I00159']
-    # ]
+#     qy0000ouput = [
+#         globals()['I00128'], globals()['I00129'], globals()['I00130'], globals()['I00131'], globals()['I00132'], globals()['I00133'], globals()['I00134'], globals()['I00135'], globals()['I00136'], globals()['I00137'], globals()['I00138'], globals()['I00139'],
+#                 globals()['I00140'], globals()['I00141'], globals()['I00142'], globals()['I00143'], #Ga kepakai
+#                 globals()['I00144'], globals()['I00145'], globals()['I00146'], globals()['I00147'], globals()['I00148'], globals()['I00149'], globals()['I00150'], globals()['I00151'], # Akhir Baris 1
+#                 globals()['I00152'], globals()['I00153'], globals()['I00154'], globals()['I00155'], globals()['I00156'], globals()['I00157'], globals()['I00158'], globals()['I00159']
+#     ]
     
-    # qy0001ouput = [
-    #     globals()['I00160'], globals()['I00161'], globals()['I00162'], globals()['I00163'],
-    #             globals()['I00164'], globals()['I00165'], globals()['I00166'], globals()['I00167'], globals()['I00168'], globals()['I00169'], globals()['I00170'], globals()['I00171'], globals()['I00172'], globals()['I00173'], globals()['I00174'], globals()['I00175'], 
-    #             globals()['I00176'], globals()['I00177'], globals()['I00178'], globals()['I00179'], globals()['I00180'], globals()['I00181'], globals()['I00182'], globals()['I00183'], globals()['I00184'], globals()['I00185'], globals()['I00186'], globals()['I00187'], 
-    #             globals()['I00188'], globals()['I00189'], globals()['I00190'], globals()['I00191']
-    # ]
+#     qy0001ouput = [
+#         globals()['I00160'], globals()['I00161'], globals()['I00162'], globals()['I00163'],
+#                 globals()['I00164'], globals()['I00165'], globals()['I00166'], globals()['I00167'], globals()['I00168'], globals()['I00169'], globals()['I00170'], globals()['I00171'], globals()['I00172'], globals()['I00173'], globals()['I00174'], globals()['I00175'], 
+#                 globals()['I00176'], globals()['I00177'], globals()['I00178'], globals()['I00179'], globals()['I00180'], globals()['I00181'], globals()['I00182'], globals()['I00183'], globals()['I00184'], globals()['I00185'], globals()['I00186'], globals()['I00187'], 
+#                 globals()['I00188'], globals()['I00189'], globals()['I00190'], globals()['I00191']
+#     ]
 
-    # qy0002ouput = [
-    #     globals()['I00192'], globals()['I00193'], globals()['I00194'], globals()['I00195'], globals()['I00196'], globals()['I00197'], globals()['I00198'], globals()['I00199'], globals()['I00200'], globals()['I00201'], globals()['I00202'], globals()['I00203'],
-    #             globals()['I00204'], globals()['I00205'], globals()['I00206'], globals()['I00207'], globals()['I00208'], globals()['I00209'], globals()['I00210'], globals()['I00211'], globals()['I00212'], globals()['I00213'], globals()['I00214'], globals()['I00215'],
-    #             globals()['I00216'], globals()['I00217'], globals()['I00218'], globals()['I00219'], globals()['I00220'], globals()['I00221'], globals()['I00222'], globals()['I00223']
+#     qy0002ouput = [
+#         globals()['I00192'], globals()['I00193'], globals()['I00194'], globals()['I00195'], globals()['I00196'], globals()['I00197'], globals()['I00198'], globals()['I00199'], globals()['I00200'], globals()['I00201'], globals()['I00202'], globals()['I00203'],
+#                 globals()['I00204'], globals()['I00205'], globals()['I00206'], globals()['I00207'], globals()['I00208'], globals()['I00209'], globals()['I00210'], globals()['I00211'], globals()['I00212'], globals()['I00213'], globals()['I00214'], globals()['I00215'],
+#                 globals()['I00216'], globals()['I00217'], globals()['I00218'], globals()['I00219'], globals()['I00220'], globals()['I00221'], globals()['I00222'], globals()['I00223']
 
-    # ]
+#     ]
 
-    # qy0003ouput = [
-    #     globals()['I00224'], globals()['I00225'], globals()['I00226'], globals()['I00227'],
-    #             globals()['I00228'], globals()['I00229'], globals()['I00230'], globals()['I00231'], globals()['I00232'], globals()['I00233'], globals()['I00234'], globals()['I00235'], globals()['I00236'], globals()['I00237'], globals()['I00238'], globals()['I00239'],
-    #             globals()['I00240'], globals()['I00241'], globals()['I00242'], globals()['I00243'], globals()['I00244'], globals()['I00245'], globals()['I00246'], globals()['I00247'], globals()['I00248'], globals()['I00249'], globals()['I00250'], globals()['I00251'],
-    #             globals()['I00252'], globals()['I00253'], globals()['I00254'], globals()['I00255'] 
-    # ]
+#     qy0003ouput = [
+#         globals()['I00224'], globals()['I00225'], globals()['I00226'], globals()['I00227'],
+#                 globals()['I00228'], globals()['I00229'], globals()['I00230'], globals()['I00231'], globals()['I00232'], globals()['I00233'], globals()['I00234'], globals()['I00235'], globals()['I00236'], globals()['I00237'], globals()['I00238'], globals()['I00239'],
+#                 globals()['I00240'], globals()['I00241'], globals()['I00242'], globals()['I00243'], globals()['I00244'], globals()['I00245'], globals()['I00246'], globals()['I00247'], globals()['I00248'], globals()['I00249'], globals()['I00250'], globals()['I00251'],
+#                 globals()['I00252'], globals()['I00253'], globals()['I00254'], globals()['I00255'] 
+#     ]
     
     # for i, value in enumerate(qy0000ouput):
     #     if value:
@@ -1070,7 +983,6 @@ def setOutputToRLY():
     #         'Output2': outputHex2,
     #         'Output3': outputHex3
     #     }})
-    return None
     
 
 def calculateV0157ToPanelAlarmErrorSourcesZ0err():
@@ -1142,11 +1054,7 @@ def errBuzzUpdated():
     
     # print(f"V158bitand : {V158bitand}") # V158bitand itu signal error baru
     # setelah itu di OR dgn V158buzz untuk menambahkan ke buzzer.
-
-    if V158bitand and V0158AlarmBuzrOutputZ0err:
-        V158bitor = BITOR(V0158AlarmBuzrOutputZ0err, V158bitand)
-    else:
-        V158bitor = 0
+    V158bitor = BITOR(V0158AlarmBuzrOutputZ0err, V158bitand)
     
     # refresh V158buzz
     V0158AlarmBuzrOutputZ0err = V158bitor
@@ -1156,7 +1064,6 @@ def errBuzzUpdated():
         V0159AlarmHoldOutputZ0err = V159hold
     # V0159AlarmHoldOutputZ0err DONE
     else:
-        V159hold = 0
         V0159AlarmHoldOutputZ0err = 0
         V0158AlarmBuzrOutputZ0err = 0
 
@@ -1164,7 +1071,6 @@ def errBuzzUpdated():
     if V0157ToPanelAlarmErrorSourcesZ0err and V0159AlarmHoldOutputZ0err:
         V0157 = BITAND(V0157ToPanelAlarmErrorSourcesZ0err, V0159AlarmHoldOutputZ0err)
     else:
-        V0157 = 0
         V0157ToPanelAlarmErrorSourcesZ0err = 0
         V0159AlarmHoldOutputZ0err = 0
     
@@ -1185,71 +1091,71 @@ def errBuzzUpdated():
             'V0157': V0157,
             'V0158': V0158AlarmBuzrOutputZ0err,
             'V0159': V0159AlarmHoldOutputZ0err,
-            # 'J00512': globals()['J00512'],
-            # 'J00513': globals()['J00513'],
-            # 'J00514': globals()['J00514'],
-            # 'J00515': globals()['J00515'],
-            # 'J00516': globals()['J00516'],
-            # 'J00517': globals()['J00517'],
-            # 'J00518': globals()['J00518'],
-            # 'J00519': globals()['J00519'],
-            # 'J00520': globals()['J00520'],
-            # 'J00521': globals()['J00521'],
-            # 'J00522': globals()['J00522'],
-            # 'J00523': globals()['J00523'],
-            # 'J00524': globals()['J00524'],
-            # 'J00525': globals()['J00525'],
-            # 'J00526': globals()['J00526'],
-            # 'J00527': globals()['J00527'],
-            # 'J00528': globals()['J00528'],
-            # 'J00529': globals()['J00529'],
-            # 'J00530': globals()['J00530'],
-            # 'J00531': globals()['J00531'],
-            # 'J00532': globals()['J00532'],
-            # 'J00533': globals()['J00533'],
-            # 'J00534': globals()['J00534'],
-            # 'J00535': globals()['J00535'],
-            # 'J00536': globals()['J00536'],
-            # 'J00537': globals()['J00537'],
-            # 'J00538': globals()['J00538'],
-            # 'J00539': globals()['J00539'],
-            # 'J00540': globals()['J00540'],
-            # 'J00543': globals()['J00543'],
-            # 'J00544': globals()['J00544'],
-            # 'J00545': globals()['J00545'],
-            # 'J00546': globals()['J00546'],
-            # 'J00547': globals()['J00547'],
-            # 'J00548': globals()['J00548'],
-            # 'J00549': globals()['J00549'],
-            # 'J00550': globals()['J00550'],
-            # 'J00551': globals()['J00551'],
-            # 'J00552': globals()['J00552'],
-            # 'J00553': globals()['J00553'],
-            # 'J00554': globals()['J00554'],
-            # 'J00555': globals()['J00555'],
-            # 'J00556': globals()['J00556'],
-            # 'J00557': globals()['J00557'],
-            # 'J00558': globals()['J00558'],
-            # 'J00559': globals()['J00559'],
-            # 'J00560': globals()['J00560'],
-            # 'J00561': globals()['J00561'],
-            # 'J00562': globals()['J00562'],
-            # 'J00563': globals()['J00563'],
-            # 'J00564': globals()['J00564'],
-            # 'J00565': globals()['J00565'],
-            # 'J00566': globals()['J00566'],
-            # 'J00567': globals()['J00567'],
-            # 'J00568': globals()['J00568'],
-            # 'J00569': globals()['J00569'],
-            # 'J00570': globals()['J00570'],
-            # 'J00571': globals()['J00571'],
-            # 'J00572': globals()['J00572'],
-            # 'J00573': globals()['J00573'],
-            # 'J00574': globals()['J00574'],
-            # 'J00575': globals()['J00575']
+            'J00512': globals()['J00512'],
+            'J00513': globals()['J00513'],
+            'J00514': globals()['J00514'],
+            'J00515': globals()['J00515'],
+            'J00516': globals()['J00516'],
+            'J00517': globals()['J00517'],
+            'J00518': globals()['J00518'],
+            'J00519': globals()['J00519'],
+            'J00520': globals()['J00520'],
+            'J00521': globals()['J00521'],
+            'J00522': globals()['J00522'],
+            'J00523': globals()['J00523'],
+            'J00524': globals()['J00524'],
+            'J00525': globals()['J00525'],
+            'J00526': globals()['J00526'],
+            'J00527': globals()['J00527'],
+            'J00528': globals()['J00528'],
+            'J00529': globals()['J00529'],
+            'J00530': globals()['J00530'],
+            'J00531': globals()['J00531'],
+            'J00532': globals()['J00532'],
+            'J00533': globals()['J00533'],
+            'J00534': globals()['J00534'],
+            'J00535': globals()['J00535'],
+            'J00536': globals()['J00536'],
+            'J00537': globals()['J00537'],
+            'J00538': globals()['J00538'],
+            'J00539': globals()['J00539'],
+            'J00540': globals()['J00540'],
+            'J00543': globals()['J00543'],
+            'J00544': globals()['J00544'],
+            'J00545': globals()['J00545'],
+            'J00546': globals()['J00546'],
+            'J00547': globals()['J00547'],
+            'J00548': globals()['J00548'],
+            'J00549': globals()['J00549'],
+            'J00550': globals()['J00550'],
+            'J00551': globals()['J00551'],
+            'J00552': globals()['J00552'],
+            'J00553': globals()['J00553'],
+            'J00554': globals()['J00554'],
+            'J00555': globals()['J00555'],
+            'J00556': globals()['J00556'],
+            'J00557': globals()['J00557'],
+            'J00558': globals()['J00558'],
+            'J00559': globals()['J00559'],
+            'J00560': globals()['J00560'],
+            'J00561': globals()['J00561'],
+            'J00562': globals()['J00562'],
+            'J00563': globals()['J00563'],
+            'J00564': globals()['J00564'],
+            'J00565': globals()['J00565'],
+            'J00566': globals()['J00566'],
+            'J00567': globals()['J00567'],
+            'J00568': globals()['J00568'],
+            'J00569': globals()['J00569'],
+            'J00570': globals()['J00570'],
+            'J00571': globals()['J00571'],
+            'J00572': globals()['J00572'],
+            'J00573': globals()['J00573'],
+            'J00574': globals()['J00574'],
+            'J00575': globals()['J00575']
             }})
 
-# penambahan update log secara terus menerus setiap 30 detik
+# penambahan update log secara terus menerus setiap 5 detik
 def updateQueuelog():
     global doc_antrian
     while True:
@@ -1262,33 +1168,6 @@ def updateQueuelog():
                 {"$unset": fields_to_unset} 
             )
 
-def manualSelector():
-    inf1 = bool(not ((globals()['V0148'] & 32768) == 32768)  and (globals()['V0144'] == 32768 or globals()['V0140'] == 32768))
-    inf2 = bool(not ((globals()['V0148'] & 16384) == 16384) and (globals()['V0144'] == 16384 or globals()['V0140'] == 16384))
-    inf3 = bool(not ((globals()['V0148'] & 8192) == 8192) and (globals()['V0144'] == 8192 or globals()['V0140'] == 8192))
-    inf4 = bool(not ((globals()['V0148'] & 4096) == 4096) and (globals()['V0144'] == 4096 or globals()['V0140'] == 4096))
-    inh1 = bool(not ((globals()['V0148'] & 2048) == 2048) and (globals()['V0145'] == 2048 or globals()['V0141'] == 2048))
-    inh2 = bool(not ((globals()['V0148'] & 1024) == 1024) and (globals()['V0145'] == 1024 or globals()['V0141'] == 1024))
-
-    if inf1 or inf2 or inf3 or inf4:
-        globals()['V0144'] = 0
-        globals()['V0140'] = 0
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'V0144': 0,
-                'V0140': 0
-            }})
-    if inh1 or inh2:
-        globals()['V0145'] = 0
-        globals()['V0141'] = 0
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'V0145': 0,
-                'V0141': 0
-            }})
-
 # penambahan filter anti double fungsi yang sama dalam satu waktu
 def queueManage():
     global threads, queueToCall, queueToCallText, doc_antrian
@@ -1297,10 +1176,6 @@ def queueManage():
     thread_log = threading.Thread(target=updateQueuelog)
     thread_log.start()
     while True:
-        AutoSelectorB()
-        manualSelector()
-        updated_queue, _ = processQueue()
-        updateProcess(updated_queue)
         for queue in queueToCall:
             if queue not in [q[0] for q in filtered_queueToCall]:  # pastikan hanya dibandingkan dengan elemen fungsi (bukan tuple keseluruhan)
                 filtered_queueToCall.append((queue, {"time": 0}))
@@ -1351,29 +1226,13 @@ def queueManage():
         # for thread in threads:
         #     thread.join()
         threads = [thread for thread in threads if thread.is_alive()]
+
         # timerWorker()
         time.sleep(0.1)
         # time.sleep(1)
 
-def unpack_processes(packed_processes: dict):
-    # Unpack 8 bits per byte to Jxxxxx keys
-    for j in range(16):
-        qj_key = f"qj{str(j).zfill(4)}latchv"
-        if qj_key not in packed_processes.keys():
-            continue
-        qj_val = packed_processes[qj_key]
-        if not isinstance(qj_val, int):
-            continue
-        for bit_position in range(8):
-            process_idx = j * 8 + bit_position
-            old_val = globals().get(f'J{process_idx:05d}')
-            bit_val = (qj_val >> bit_position) & 1
-
-            if old_val != bool(bit_val):
-                globals()[f'J{process_idx:05d}'] = bit_val == 1
-
 def listenTriggerMongoDB():
-    global changed_keys, updated_queue, updated_var_names
+    global changed_keys
 
     pipeline = []
     counterAntrian = 0
@@ -1424,13 +1283,8 @@ def listenTriggerMongoDB():
                         globals()[var_nameI] = document[var_nameI]
 
             TARGET_QI_KEYS_0_TO_15 = {f"qi{str(j).zfill(4)}glovar" for j in range(16)}
-            TARGET_QJ_KEYS_0_TO_71 = {f"qj{str(j).zfill(4)}latchv" for j in range(72)}
-
             if TARGET_QI_KEYS_0_TO_15 & document.keys():
                 unpack_inputs(document)
-
-            if TARGET_QJ_KEYS_0_TO_71 & document.keys():
-                unpack_processes(document)
 
             setOutputToRLY()
             globals()['firstBoot'] = False
@@ -1442,15 +1296,12 @@ def listenTriggerMongoDB():
             changed_keys = []
             if change['operationType'] == 'update':
                 try:
-                    _, updated_var_names = processQueue()
-                    # updateProcess(updated_queue)
                     # Ambil field yang diubah
                     updated_fields = change['updateDescription']['updatedFields']
                     
                     print(f"{updated_fields}")
 
                     TARGET_QI_KEYS_0_TO_15 = {f"qi{str(j).zfill(4)}glovar" for j in range(16)}
-                    TARGET_QJ_KEYS_0_TO_71 = {f"qj{str(j).zfill(4)}latchv" for j in range(72)}
 
                     for key, value in updated_fields.items():
                         if key in globals() and key not in TARGET_QI_KEYS_0_TO_15:
@@ -1459,11 +1310,8 @@ def listenTriggerMongoDB():
                     if TARGET_QI_KEYS_0_TO_15 & updated_fields.keys():
                         unpack_inputs(updated_fields)
 
-                    if TARGET_QJ_KEYS_0_TO_71 & updated_fields.keys():
-                        unpack_processes(updated_fields)
-
                     # EmergencyStop
-                    if ('J00543' in changed_keys or 'J00543' in updated_fields or 'J00543' in updated_var_names):
+                    if ('J00543' in changed_keys or 'J00543' in updated_fields):
                         globals()['queueToCall'].append(StopAllBecauseEmergencyStop)
                         globals()['queueToCallText'].append(f"{counterAntrian}-StopAllBecauseEmergencyStop")
 
@@ -1471,7 +1319,6 @@ def listenTriggerMongoDB():
                     if ('I00029' in changed_keys or 'I00029' in updated_fields):
                         globals()['queueToCall'].append(BuzzerStop)
                         globals()['queueToCallText'].append(f"{counterAntrian}-BuzzerStop")
-
                     # AlarmReset
                     if ('I00030' in changed_keys or 'I00030' in updated_fields):
                         globals()['queueToCall'].append(AlarmReset)
@@ -1480,66 +1327,51 @@ def listenTriggerMongoDB():
                     # LINE Z
 
                     # # Common Auto
-                    if ('V0149' in updated_fields):
+                    if 'V0149' in updated_fields:
                         globals()['queueToCall'].append(V0149func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-V0149func-V0149:{globals()['V0149']}")
-
-                    if ('J00398' in updated_fields or 'J00398' in updated_var_names):
+                    if 'J00398' in updated_fields:
                         globals()['queueToCall'].append(J00398func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00398func-J00398:{globals()['J00398']}")
-
-                    if ('J00399' in updated_fields or 'J00399' in updated_var_names):
+                    if 'J00399' in updated_fields:
                         globals()['queueToCall'].append(J00399func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00399func-J00399:{globals()['J00399']}")
-
-                    if ('J00400' in updated_fields or 'J00400' in updated_var_names):
+                    if 'J00400' in updated_fields:
                         globals()['queueToCall'].append(J00400func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00400func-J00400:{globals()['J00400']}")
-
-                    if ('J00046' in updated_fields or 'J00046' in updated_var_names):
+                    if 'J00046' in updated_fields:
                         globals()['queueToCall'].append(J00046func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00046func-J00046:{globals()['J00046']}")
-
-                    if ('J00047' in updated_fields or 'J00047' in updated_var_names):
+                    if 'J00047' in updated_fields:
                         globals()['queueToCall'].append(J00047func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00047func-J00047:{globals()['J00047']}")
-
-                    if ('J00048' in updated_fields or 'J00048' in updated_var_names):
+                    if 'J00048' in updated_fields:
                         globals()['queueToCall'].append(J00048func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00048func-J00048:{globals()['J00048']}")
-
                     if ('I00060' in changed_keys or 'I00060' in updated_fields):
                         globals()['queueToCall'].append(I00060func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00060func-I00060:{globals()['I00060']}")
-
                     if ('I00061' in changed_keys or 'I00061' in updated_fields):
                         globals()['queueToCall'].append(I00061func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00061func-I00061:{globals()['I00061']}")
-
                     if ('I00062' in changed_keys or 'I00062' in updated_fields):
                         globals()['queueToCall'].append(I00062func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00062func-I00062:{globals()['I00062']}")
-
                     if ('I00063' in changed_keys or 'I00063' in updated_fields):
                         globals()['queueToCall'].append(I00063func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00063func-I00063:{globals()['I00063']}")
-
-                    if ('I00254' in updated_fields):
+                    if 'I00254' in updated_fields:
                         globals()['queueToCall'].append(I00254func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00254func-I00254:{globals()['I00254']}")
-
-                    if ('I00253' in updated_fields):
+                    if 'I00253' in updated_fields:
                         globals()['queueToCall'].append(I00253func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00253func-I00253:{globals()['I00253']}")
-
-                    if ('I00255' in updated_fields):
+                    if 'I00255' in updated_fields:
                         globals()['queueToCall'].append(I00255func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00255func-I00255:{globals()['I00255']}")
-
-                    if ('I00252' in updated_fields):
+                    if 'I00252' in updated_fields:
                         globals()['queueToCall'].append(I00252func)
                         globals()['queueToCallText'].append(f"{counterAntrian}-I00252func-I00252:{globals()['I00252']}")
-
 
                     # LINE B
                     # IsJamFault
@@ -1549,56 +1381,48 @@ def listenTriggerMongoDB():
                         print("I00024")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00024:{globals()['I00024']}")
-
                     if ('I00000' in changed_keys or 'I00000' in updated_fields):
                         if not globals()['I00000']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I0000-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00000:{globals()['I00000']}")
-
                     if ('I00003' in changed_keys or 'I00003' in updated_fields):
                         if not globals()['I00003']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I00003-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00003:{globals()['I00003']}")
-
                     if ('I00004' in changed_keys or 'I00004' in updated_fields):
                         if not globals()['I00004']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I0004-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00004:{globals()['I00004']}")
-
                     if ('I00005' in changed_keys or 'I00005' in updated_fields):
                         if not globals()['I00005']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I00005-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00005:{globals()['I00005']}")
-
                     if ('I00011' in changed_keys or 'I00011' in updated_fields):
                         if not globals()['I00011']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I00011-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00011:{globals()['I00011']}")
-
                     if ('I00012' in changed_keys or 'I00012' in updated_fields):
                         if not globals()['I00012']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I00012-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00012:{globals()['I00012']}")
-
                     if ('I00013' in changed_keys or 'I00013' in updated_fields):
                         if not globals()['I00013']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
                         print("I00013-penyebab")
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00013:{globals()['I00013']}")
-
                     if ('I00025' in changed_keys or 'I00025' in updated_fields):
                         if not globals()['I00025']:
                             calculateV0157ToPanelAlarmErrorSourcesZ0err()
@@ -1607,53 +1431,48 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00025:{globals()['I00025']}")
 
                     # MotorMaterMixRotorB0
-                    if ('J00000' in updated_fields or 'J00352' in updated_fields or 'J00000' in updated_var_names or 'J00352' in updated_var_names or
-                        ('J00516' in changed_keys or 'J00516' in updated_fields or 'J00516' in updated_var_names)):
-                        globals()['queueToCall'].append(MotorMaterMixRotorB0)
+                    if 'J00000' in updated_fields or 'J00352' in updated_fields or ('J00516' in changed_keys or 'J00516' in updated_fields):
+                        globals()['queueToCall'].append(MoveCtrl_MotorMaterMixRotorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorB0DoFwd-J00000:{globals()['J00000']}")
-
-                    if ('J00001' in updated_fields or 'J00353' in updated_fields or 'J00001' in updated_var_names or 'J00353' in updated_var_names or
-                        ('J00516' in changed_keys or 'J00516' in updated_fields or 'J00516' in updated_var_names)):
-                        globals()['queueToCall'].append(MotorMaterMixRotorB0)
+                    if 'J00001' in updated_fields or 'J00353' in updated_fields or ('J00516' in changed_keys or 'J00516' in updated_fields):
+                        globals()['queueToCall'].append(MoveCtrl_MotorMaterMixRotorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorB0DoRev-J00000:{globals()['J00000']}")
 
                     # PneumMaterMixDoorB0
-                    if ('J00002' in updated_fields or 'J00354' in updated_fields or 'J00002' in updated_var_names or 'J00354' in updated_var_names):
-                        globals()['queueToCall'].append(PneumMaterMixDoorB0Open)
+                    if 'J00002' in updated_fields or 'J00354' in updated_fields:
+                        globals()['queueToCall'].append(OpenClose_PneumMaterMixDoorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumMaterMixDoorB0Open-J00002:{globals()['J00002']}")
 
-                    if ('J00003' in updated_fields or 'J00355' in updated_fields or 'J00003' in updated_var_names or 'J00355' in updated_var_names):
-                        globals()['queueToCall'].append(PneumMaterMixDoorB0Close)
+                    if 'J00003' in updated_fields or 'J00355' in updated_fields:
+                        globals()['queueToCall'].append(OpenClose_PneumMaterMixDoorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumMaterMixDoorB0Close-J00003:{globals()['J00003']}")
 
-                    if ('I00128' in changed_keys or 'I00128' in updated_fields or 'I00129' in updated_fields):
+                    if ('I00128' in changed_keys or 'I00128' in updated_fields) or 'I00129' in updated_fields:
                         globals()['queueToCall'].append(TimerK000)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK000-I00128:{globals()['I00128']}")
 
-                    if ('J00512' in updated_fields or 'J00512' in updated_var_names):
+                    if 'J00512' in updated_fields:
                         globals()['queueToCall'].append(PneumMaterMixDoorB0Fault)
                         globals()['queueToCallText'].append("PneumMaterMixDoorB0Fault")
-
-                    if ('J00544' in updated_fields or 'J00544' in updated_var_names):
+                    if 'J00544' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # MotorMateriVbratorB0
-                    if ('J00004' in updated_fields or 'J00356' in updated_fields or 'J00004' in updated_var_names or 'J00356' in updated_var_names or
-                        ('J00517' in changed_keys or 'J00517' in updated_fields or 'J00517' in updated_var_names)):
-                        globals()['queueToCall'].append(MotorMateriVbratorB0)
+                    if 'J00004' in updated_fields or 'J00356' in updated_fields or ('J00517' in changed_keys or 'J00517' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorMateriVbratorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMateriVbratorB0-J00004:{globals()['J00004']}")
 
                     # MotorMatScrewCnvyrB0
-                    if ('J00017' in updated_fields or 'J00369' in updated_fields or 'J00017' in updated_var_names or 'J00369' in updated_var_names):
-                        globals()['queueToCall'].append(MotorMatScrewCnvyrB0)
+                    if 'J00017' in updated_fields or 'J00369' in updated_fields:
+                        globals()['queueToCall'].append(MoveCtrl_MotorMatScrewCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrB0DoRev-J00017:{globals()['J00017']}")
 
-                    if ('J00016' in updated_fields or 'J00368' in updated_fields or 'J00016' in updated_var_names or 'J00368' in updated_var_names):
-                        globals()['queueToCall'].append(MotorMatScrewCnvyrB0)
+                    if 'J00016' in updated_fields or 'J00368' in updated_fields:
+                        globals()['queueToCall'].append(MoveCtrl_MotorMatScrewCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrB0DoFwd-J00016:{globals()['J00016']}")
 
-                    if ('J00518' in changed_keys or 'J00518' in updated_fields or 'J00518' in updated_var_names):
+                    if ('J00518' in changed_keys or 'J00518' in updated_fields):
                         globals()['queueToCall'].append(MotorMatScrewCnvyrB0Fault)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrB0Fault-J00518:{globals()['J00518']}")
 
@@ -1666,75 +1485,74 @@ def listenTriggerMongoDB():
                     #     globals()['queueToCallText'].append(f"{counterAntrian}-TimerK014-I00149:{globals()['I00149']}")
 
                     # MotorToRotaryCnvyrB0
-                    if 'J00005' in updated_fields or 'J00357' in updated_fields or 'J00005' in updated_var_names or 'J00357' in updated_var_names or ('J00519' in changed_keys or 'J00519' in updated_fields or 'J00519' in updated_var_names):
-                        globals()['queueToCall'].append(MotorToRotaryCnvyrB0)
+                    if 'J00005' in updated_fields or 'J00357' in updated_fields or ('J00519' in changed_keys or 'J00519' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorToRotaryCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorToRotaryCnvyrB0-J00005:{globals()['J00005']}")
 
                     # PneumToRotaryCnvyrB0
-                    if 'J00007' in updated_fields or 'J00359' in updated_fields or 'J00007' in updated_var_names or 'J00359' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRotaryCnvyrB0)
+                    if 'J00007' in updated_fields or 'J00359' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRotaryCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrB0-J00007:{globals()['J00007']}")
 
                     # PneumToRotaryCnvyrB1
-                    if 'J00009' in updated_fields or 'J00361' in updated_fields or 'J00009' in updated_var_names or 'J00361' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRotaryCnvyrB1)
+                    if 'J00009' in updated_fields or 'J00361' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRotaryCnvyrB1)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrB1-J00009:{globals()['J00009']}")
 
                     # PneumToRotaryCnvyrB2
-                    if 'J00011' in updated_fields or 'J00363' in updated_fields or 'J00011' in updated_var_names or 'J00363' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRotaryCnvyrB2)
+                    if 'J00011' in updated_fields or 'J00363' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRotaryCnvyrB2)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrB2-J00011:{globals()['J00011']}")
 
                     # PneumToRotaryCnvyrB3
-                    if 'J00013' in updated_fields or 'J00365' in updated_fields or 'J00013' in updated_var_names or 'J00365' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRotaryCnvyrB3)
+                    if 'J00013' in updated_fields or 'J00365' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRotaryCnvyrB3)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrB3-J00013:{globals()['J00013']}")
 
                     # PneumToRotaryCnvyrB4
-                    if 'J00015' in updated_fields or 'J00367' in updated_fields or 'J00015' in updated_var_names or 'J00367' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRotaryCnvyrB4)
+                    if 'J00015' in updated_fields or 'J00367' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRotaryCnvyrB4)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrB4-J00015:{globals()['J00015']}")
 
                     # MotorFrmRtaryCnvyrB0
-                    if 'J00032' in updated_fields or 'J00384' in updated_fields or 'J00032' in updated_var_names or 'J00384' in updated_var_names or ('J00520' in changed_keys or 'J00520' in updated_fields or 'J00520' in updated_var_names):
-                        globals()['queueToCall'].append(MotorFrmRtaryCnvyrB0)
+                    if 'J00032' in updated_fields or 'J00384' in updated_fields or ('J00520' in changed_keys or 'J00520' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorFrmRtaryCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorFrmRtaryCnvyrB0-J00032:{globals()['J00032']}")
 
                     # MotorUpladderCnvyrB0
-                    if 'J00033' in updated_fields or 'J00385' in updated_fields or 'J00033' in updated_var_names or 'J00385' in updated_var_names or ('J00521' in changed_keys or 'J00521' in updated_fields or 'J00521' in updated_var_names):
-                        globals()['queueToCall'].append(MotorUpladderCnvyrB0)
+                    if 'J00033' in updated_fields or 'J00385' in updated_fields or ('J00521' in changed_keys or 'J00521' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorUpladderCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorUpladderCnvyrB0-J00033:{globals()['J00033']}")
 
                     # MotorToHopperCnvyrB0
-                    if 'J00018' in updated_fields or 'J00370' in updated_fields or 'J00018' in updated_var_names or 'J00370' in updated_var_names or ('J00522' in changed_keys or 'J00522' in updated_fields or 'J00522' in updated_var_names):
-                        globals()['queueToCall'].append(MotorToHopperCnvyrB0)
+                    if 'J00018' in updated_fields or 'J00370' in updated_fields or ('J00522' in changed_keys or 'J00522' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorToHopperCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorToHopperCnvyrB0-J00018:{globals()['J00018']}")
 
                     # PneumToHopperCnvyrB0
-                    if 'J00020' in updated_fields or 'J00372' in updated_fields or 'J00020' in updated_var_names or 'J00372' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToHopperCnvyrB0)
+                    if 'J00020' in updated_fields or 'J00372' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToHopperCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrB0-J00020:{globals()['J00020']}")
 
                     # PneumToHopperCnvyrB1
-                    if 'J00022' in updated_fields or 'J00374' in updated_fields or 'J00022' in updated_var_names or 'J00374' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToHopperCnvyrB1)
+                    if 'J00022' in updated_fields or 'J00374' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToHopperCnvyrB1)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrB1-J00022:{globals()['J00022']}")
 
                     # PneumToHopperCnvyrB2
-                    if 'J00024' in updated_fields or 'J00376' in updated_fields or 'J00024' in updated_var_names or 'J00376' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToHopperCnvyrB2)
+                    if 'J00024' in updated_fields or 'J00376' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToHopperCnvyrB2)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrB2-J00024:{globals()['J00024']}")
 
                     # PneumToHopperCnvyrB3
-                    if 'J00026' in updated_fields or 'J00378' in updated_fields or 'J00026' in updated_var_names or 'J00378' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToHopperCnvyrB3)
+                    if 'J00026' in updated_fields or 'J00378' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToHopperCnvyrB3)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrB3-J00026:{globals()['J00026']}")
 
                     # PneumTbletHoprDoorB0
-                    if 'J00027' in updated_fields or 'J00379' in updated_fields or 'J00027' in updated_var_names or 'J00379' in updated_var_names:
-                        globals()['queueToCall'].append(PneumTbletHoprDoorB0Open)
+                    if 'J00027' in updated_fields or 'J00379' in updated_fields:
+                        globals()['queueToCall'].append(Open_PneumTbletHoprDoorB0Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorB0Open-J00027:{globals()['J00027']}")
-
                     # if ('I00020' in changed_keys or 'I00020' in updated_fields): # Modified, but kept commented
                     #     if globals()['I00020'] and globals()['J00379']  :
                     #         globals()['queueToCall'].append(PneumTbletHoprDoorB0Open)
@@ -1747,16 +1565,16 @@ def listenTriggerMongoDB():
                     #     globals()['queueToCall'].append(TimerK001)
                     #     globals()['queueToCallText'].append(f"{counterAntrian}-TimerK001-I00164:{globals()['I00164']}")
 
-                    if 'J00513' in updated_fields or 'J00513' in updated_var_names:
+                    if 'J00513' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorB0Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorB0Fault")
-                    if 'J00545' in updated_fields or 'J00545' in updated_var_names:
+                    if 'J00545' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # PneumTbletHoprDoorB1
-                    if ('J00029' in updated_fields or 'J00029' in updated_var_names) or ('J00381' in updated_fields or 'J00381' in updated_var_names):
-                        globals()['queueToCall'].append(PneumTbletHoprDoorB1Open)
+                    if 'J00029' in updated_fields or 'J00381' in updated_fields:
+                        globals()['queueToCall'].append(Open_PneumTbletHoprDoorB1Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorB1Open-J00027:{globals()['J00027']}")
                     # if ('I00022' in changed_keys or 'I00022' in updated_fields): # Modified, but kept commented
                     #     if globals()['I00022'] and globals()['J00381']  :
@@ -1770,29 +1588,26 @@ def listenTriggerMongoDB():
                     #     globals()['queueToCall'].append(TimerK002)
                     #     globals()['queueToCallText'].append(f"{counterAntrian}-TimerK002-I00166:{globals()['I00166']}")
 
-                    if 'J00514' in updated_fields or 'J00514' in updated_var_names:
+                    if 'J00514' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorB1Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorB1Fault")
-                    if 'J00546' in updated_fields or 'J00546' in updated_var_names:
+                    if 'J00546' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # MotorTbletHoprDoorB0
-                    if 'J00031' in updated_fields or 'J00383' in updated_fields or 'J00515' in updated_fields or \
-                       'J00031' in updated_var_names or 'J00383' in updated_var_names or 'J00515' in updated_var_names:
-                        globals()['queueToCall'].append(MotorTbletHoprDoorB0)
+                    if 'J00031' in updated_fields or 'J00383' in updated_fields or 'J00515' in updated_fields:
+                        globals()['queueToCall'].append(StartNStop_MotorTbletHoprDoorB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorTbletHoprDoorB0-J00031:{globals()['J00031']}")
 
                     # MotorToRnCenCnyrB0
-                    if 'J00034' in updated_fields or 'J00386' in updated_fields or ('J00523' in changed_keys or 'J00523' in updated_fields) or \
-                       'J00034' in updated_var_names or 'J00386' in updated_var_names or 'J00523' in updated_var_names:
-                        globals()['queueToCall'].append(MotorToRncenCnvyrB0)
+                    if 'J00034' in updated_fields or 'J00386' in updated_fields or ('J00523' in changed_keys or 'J00523' in updated_fields):
+                        globals()['queueToCall'].append(StartNStop_MotorToRncenCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorToRncenCnvyrB0-J00034:{globals()['J00034']}")
 
                     # PneumToRncenCnvyrB0
-                    if 'J00036' in updated_fields or 'J00388' in updated_fields or \
-                       'J00036' in updated_var_names or 'J00388' in updated_var_names:
-                        globals()['queueToCall'].append(PneumToRncenCnvyrB0)
+                    if 'J00036' in updated_fields or 'J00388' in updated_fields:
+                        globals()['queueToCall'].append(Close_PneumToRncenCnvyrB0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRncenCnvyrB0-J00036:{globals()['J00036']}")
 
                     # Timer K016 - K026
@@ -1831,8 +1646,7 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK026-I00015:{globals()['I00015']}")
 
                     # Line B - Feeder Auto
-                    if 'V0144' in updated_fields or 'J00140' in updated_fields or 'J00141' in updated_fields or 'J00142' in updated_fields or 'J00143' in updated_fields or \
-                       'J00140' in updated_var_names or 'J00141' in updated_var_names or 'J00142' in updated_var_names or 'J00143' in updated_var_names:
+                    if 'V0144' in updated_fields or 'J00140' in updated_fields or 'J00141' in updated_fields or 'J00142' in updated_fields or 'J00143' in updated_fields:
                         globals()['queueToCall'].append(autoFeederLineB)
                         globals()['queueToCallText'].append(f"{counterAntrian}-autoFeederLineB")
 
@@ -1847,37 +1661,35 @@ def listenTriggerMongoDB():
                     if 'V0152' in updated_fields:
                         globals()['queueToCall'].append(V0152change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-V0152change")
-                    if 'J00135' in updated_fields or 'J00135' in updated_var_names:
+                    if 'J00135' in updated_fields:
                         globals()['queueToCall'].append(J00135change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00135change")
-                    if 'J00136' in updated_fields or 'J00136' in updated_var_names:
+                    if 'J00136' in updated_fields:
                         globals()['queueToCall'].append(J00136change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00136change")
-                    if 'J00137' in updated_fields or 'J00137' in updated_var_names:
+                    if 'J00137' in updated_fields:
                         globals()['queueToCall'].append(J00137change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00137change")
-                    if 'J00138' in updated_fields or 'J00138' in updated_var_names:
+                    if 'J00138' in updated_fields:
                         globals()['queueToCall'].append(J00138change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00138change")
-                    if 'J00139' in updated_fields or 'J00139' in updated_var_names:
+                    if 'J00139' in updated_fields:
                         globals()['queueToCall'].append(J00139change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00139change")
-                    if 'J00144' in updated_fields or 'J00144' in updated_var_names:
+                    if 'J00144' in updated_fields:
                         globals()['queueToCall'].append(J00144change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00144change")
-                    if 'J00145' in updated_fields or 'J00145' in updated_var_names:
+                    if 'J00145' in updated_fields:
                         globals()['queueToCall'].append(J00145change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00145change")
 
                     # Fill Mixer Line B
-                    if 'J00037' in updated_fields or 'J00389' in updated_fields or 'J00244' in updated_fields or 'J00245' in updated_fields or \
-                       'J00037' in updated_var_names or 'J00389' in updated_var_names or 'J00244' in updated_var_names or 'J00245' in updated_var_names:
+                    if 'J00037' in updated_fields or 'J00389' in updated_fields or 'J00244' in updated_fields or 'J00245' in updated_fields:
                         globals()['queueToCall'].append(FillerMixerBLogic)
                         globals()['queueToCallText'].append(f"{counterAntrian}-FillerMixerBLogic")
 
                     # Dump Mixer Line B
-                    if 'J00038' in updated_fields or 'J00245' in updated_fields or 'J00243' in updated_fields or \
-                       'J00038' in updated_var_names or 'J00245' in updated_var_names or 'J00243' in updated_var_names:
+                    if 'J00038' in updated_fields or 'J00245' in updated_fields or 'J00243' in updated_fields:
                         globals()['queueToCall'].append(DumpMixerBLogic)
                         globals()['queueToCallText'].append(f"{counterAntrian}-DumpMixerBLogic")
 
@@ -1887,7 +1699,7 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append(f"{counterAntrian}-autoFeederLineB")
                         globals()['queueToCall'].append([MoveChecker, ('I00144', 'J00289', 'V0013', 'U0013', 'K013')])
                         globals()['queueToCallText'].append(f"{counterAntrian}-DoFwdMotorMaterMixerRotorB0Checker")
-                        
+                    
                     if 'I00146' in updated_fields:
                         globals()['queueToCall'].append([MoveChecker, ('I00146', 'J00288', 'V0012', 'U0012', 'K012')])
                         globals()['queueToCallText'].append(f"{counterAntrian}-DoRevMotorMaterMixerRotorB0Checker")
@@ -1911,12 +1723,12 @@ def listenTriggerMongoDB():
                     if 'I00211' in updated_fields:
                         globals()['queueToCall'].append([MoveChecker, ('I00211', 'J00297', 'V0047', 'U0047', 'K047')])
                         globals()['queueToCallText'].append(f"{counterAntrian}-DoFwdToMotorMatScrewCnvyrC0Checker")
-                        
+                    
                     if 'I00213' in updated_fields:
                         globals()['queueToCall'].append([MoveChecker, ('I00213', 'J00296', 'V0046', 'U0046', 'K046')])
                         globals()['queueToCallText'].append(f"{counterAntrian}-DoRevMotorMaterMixerRotorC0Checker")
 
-                    if 'J00244' in updated_fields or 'J00244' in updated_var_names:
+                    if 'J00244' in updated_fields:
                         globals()['queueToCall'].append(ResetTimerK011)
                         globals()['queueToCallText'].append(f"{counterAntrian}-ResetTimerK011")
 
@@ -1959,216 +1771,197 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append(f"{counterAntrian}-calculateV0157z-I00085:{globals()['I00085']}")
 
                     # MotorMaterMixRotorC0
-                    if 'J00059' in updated_fields or 'J00411' in updated_fields or \
-                       'J00059' in updated_var_names or 'J00411' in updated_var_names:
+                    if 'J00059' in updated_fields or 'J00411' in updated_fields:
                         globals()['queueToCall'].append(MotorMaterMixRotorC0DoFwd)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorC0DoFwd-J00059:{globals()['J00059']}")
-                    if 'J00060' in updated_fields or 'J00412' in updated_fields or \
-                       'J00060' in updated_var_names or 'J00412' in updated_var_names:
+                    if 'J00060' in updated_fields or 'J00412' in updated_fields:
                         globals()['queueToCall'].append(MotorMaterMixRotorC0DoRev)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorC0DoRev-J00060:{globals()['J00060']}")
                     if 'I00209' in updated_fields: # Not target I-key
                         globals()['queueToCall'].append(MotorMaterMixRotorC0DoStop)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorC0DoStop-I00209:{globals()['I00209']}")
-                    if 'J00534' in updated_fields or 'J00534' in updated_var_names:
+                    if 'J00534' in updated_fields:
                         globals()['queueToCall'].append(MotorMaterMixRotorC0Fault)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMaterMixRotorC0Fault-J00534:{globals()['J00534']}")
 
                     # PneumMaterMixDoorC0
-                    if 'J00061' in updated_fields or 'J00413' in updated_fields or \
-                       'J00061' in updated_var_names or 'J00413' in updated_var_names:
+                    if 'J00061' in updated_fields or 'J00413' in updated_fields:
                         globals()['queueToCall'].append(PneumMaterMixDoorC0Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumMaterMixDoorC0Open-J00061:{globals()['J00061']}")
-                    if 'J00062' in updated_fields or 'J00414' in updated_fields or \
-                       'J00062' in updated_var_names or 'J00414' in updated_var_names:
+                    if 'J00062' in updated_fields or 'J00414' in updated_fields:
                         globals()['queueToCall'].append(PneumMaterMixDoorC0Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumMaterMixDoorC0Close-J00062:{globals()['J00062']}")
                     if 'I00192' in updated_fields or 'I00193' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK032)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK032-I00192:{globals()['I00192']}")
-                    if 'J00528' in updated_fields or 'J00528' in updated_var_names:
+                    if 'J00528' in updated_fields:
                         globals()['queueToCall'].append(PneumMaterMixDoorC0Fault)
                         globals()['queueToCallText'].append("PneumMaterMixDoorC0Fault")
-                    if 'J00560' in updated_fields or 'J00560' in updated_var_names:
+                    if 'J00560' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # MotorMateriVbratorC0
-                    if 'J00080' in updated_fields or 'J00432' in updated_fields or 'J00535' in updated_fields or \
-                       'J00080' in updated_var_names or 'J00432' in updated_var_names or 'J00535' in updated_var_names:
+                    if 'J00080' in updated_fields or 'J00432' in updated_fields or 'J00535' in updated_fields:
                         globals()['queueToCall'].append(MotorMateriVbratorC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMateriVbratorC0-J00080:{globals()['J00080']}")
 
                     # MotorMatScrewCnvyrC0
-                    if 'J00082' in updated_fields or 'J00434' in updated_fields or \
-                       'J00082' in updated_var_names or 'J00434' in updated_var_names:
+                    if 'J00082' in updated_fields or 'J00434' in updated_fields:
                         globals()['queueToCall'].append(MotorMatScrewCnvyrC0DoRev)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrC0DoRev-J00082:{globals()['J00082']}")
-                    if 'J00081' in updated_fields or 'J00433' in updated_fields or \
-                       'J00081' in updated_var_names or 'J00433' in updated_var_names:
+                    if 'J00081' in updated_fields or 'J00433' in updated_fields:
                         globals()['queueToCall'].append(MotorMatScrewCnvyrC0DoFwd)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrC0DoFwd-J00081:{globals()['J00081']}")
                     if 'I00212' in updated_fields: # Not target I-key
                         globals()['queueToCall'].append(MotorMatScrewCnvyrC0DoStop)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrC0DoStop-I00212:{globals()['I00212']}")
-                    if 'J00536' in updated_fields or 'J00536' in updated_var_names:
+                    if 'J00536' in updated_fields:
                         globals()['queueToCall'].append(MotorMatScrewCnvyrC0Fault)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorMatScrewCnvyrC0Fault-J00536:{globals()['J00536']}")
 
                     # MotorToRotaryCnvyrC0
-                    if 'J00063' in updated_fields or 'J00415' in updated_fields or 'J00537' in updated_fields or \
-                       'J00063' in updated_var_names or 'J00415' in updated_var_names or 'J00537' in updated_var_names:
+                    if 'J00063' in updated_fields or 'J00415' in updated_fields or 'J00537' in updated_fields:
                         globals()['queueToCall'].append(MotorToRotaryCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorToRotaryCnvyrC0-J00063:{globals()['J00063']}")
 
                     # PneumToRotaryCnvyrC0
-                    if 'J00065' in updated_fields or 'J00417' in updated_fields or \
-                       'J00065' in updated_var_names or 'J00417' in updated_var_names:
+                    if 'J00065' in updated_fields or 'J00417' in updated_fields:
                         globals()['queueToCall'].append(PneumToRotaryCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrC0-J00065:{globals()['J00065']}")
 
                     # PneumToRotaryCnvyrC1
-                    if 'J00067' in updated_fields or 'J00419' in updated_fields or \
-                       'J00067' in updated_var_names or 'J00419' in updated_var_names:
+                    if 'J00067' in updated_fields or 'J00419' in updated_fields:
                         globals()['queueToCall'].append(PneumToRotaryCnvyrC1)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrC1-J00067:{globals()['J00067']}")
 
                     # PneumToRotaryCnvyrC2
-                    if 'J00069' in updated_fields or 'J00421' in updated_fields or \
-                       'J00069' in updated_var_names or 'J00421' in updated_var_names:
+                    if 'J00069' in updated_fields or 'J00421' in updated_fields:
                         globals()['queueToCall'].append(PneumToRotaryCnvyrC2)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToRotaryCnvyrC2-J00069:{globals()['J00069']}")
 
                     # MotorFrmRtaryCnvyrC0
-                    if 'J00083' in updated_fields or 'J00435' in updated_fields or 'J00538' in updated_fields or \
-                       'J00083' in updated_var_names or 'J00435' in updated_var_names or 'J00538' in updated_var_names:
+                    if 'J00083' in updated_fields or 'J00435' in updated_fields or 'J00538' in updated_fields:
                         globals()['queueToCall'].append(MotorFrmRtaryCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorFrmRtaryCnvyrC0-J00083:{globals()['J00083']}")
 
                     # MotorUpladderCnvyrC0
-                    if 'J00084' in updated_fields or 'J00436' in updated_fields or 'J00539' in updated_fields or \
-                       'J00084' in updated_var_names or 'J00436' in updated_var_names or 'J00539' in updated_var_names:
+                    if 'J00084' in updated_fields or 'J00436' in updated_fields or 'J00539' in updated_fields:
                         globals()['queueToCall'].append(MotorUpladderCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorUpladderCnvyrC0-J00084:{globals()['J00084']}")
 
                     # MotorToHopperCnvyrC0
-                    if 'J00085' in updated_fields or 'J00437' in updated_fields or 'J00540' in updated_fields or \
-                       'J00085' in updated_var_names or 'J00437' in updated_var_names or 'J00540' in updated_var_names:
+                    if 'J00085' in updated_fields or 'J00437' in updated_fields or 'J00540' in updated_fields:
                         globals()['queueToCall'].append(MotorToHopperCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-MotorToHopperCnvyrC0-J00085:{globals()['J00085']}")
 
                     # PneumToHopperCnvyrC0
-                    if 'J00087' in updated_fields or 'J00439' in updated_fields or \
-                       'J00087' in updated_var_names or 'J00439' in updated_var_names:
+                    if 'J00087' in updated_fields or 'J00439' in updated_fields:
                         globals()['queueToCall'].append(PneumToHopperCnvyrC0)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrC0-J00087:{globals()['J00087']}")
 
                     # PneumToHopperCnvyrC1
-                    if 'J00089' in updated_fields or 'J00441' in updated_fields or \
-                       'J00089' in updated_var_names or 'J00441' in updated_var_names:
+                    if 'J00089' in updated_fields or 'J00441' in updated_fields:
                         globals()['queueToCall'].append(PneumToHopperCnvyrC1)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrC1-J00089:{globals()['J00089']}")
 
                     # PneumToHopperCnvyrC2
-                    if 'J00091' in updated_fields or 'J00443' in updated_fields or \
-                       'J00091' in updated_var_names or 'J00443' in updated_var_names:
+                    if 'J00091' in updated_fields or 'J00443' in updated_fields:
                         globals()['queueToCall'].append(PneumToHopperCnvyrC2)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrC2-J00091:{globals()['J00091']}")
 
                     # PneumToHopperCnvyrC3
-                    if 'J00093' in updated_fields or 'J00445' in updated_fields or \
-                       'J00093' in updated_var_names or 'J00445' in updated_var_names:
+                    if 'J00093' in updated_fields or 'J00445' in updated_fields:
                         globals()['queueToCall'].append(PneumToHopperCnvyrC3)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrC3-J00093:{globals()['J00093']}")
 
                     # PneumToHopperCnvyrC4
-                    if 'J00095' in updated_fields or 'J00447' in updated_fields or \
-                       'J00095' in updated_var_names or 'J00447' in updated_var_names:
+                    if 'J00095' in updated_fields or 'J00447' in updated_fields:
                         globals()['queueToCall'].append(PneumToHopperCnvyrC4)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumToHopperCnvyrC4-J00095:{globals()['J00095']}")
 
                     # PneumTbletHoprDoorC0
-                    if 'J00070' in updated_fields or 'J00070' in updated_var_names:
+                    if 'J00070' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC0Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC0Open-J00070:{globals()['J00070']}")
-                    if 'J00071' in updated_fields or 'J00071' in updated_var_names:
+                    if 'J00071' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC0Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC0Close-J00071:{globals()['J00071']}")
                     if 'I00214' in updated_fields or 'I00215' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK033)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK033-I00214:{globals()['I00214']}")
-                    if 'J00529' in updated_fields or 'J00529' in updated_var_names:
+                    if 'J00529' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC0Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorC0Fault")
-                    if 'J00561' in updated_fields or 'J00561' in updated_var_names:
+                    if 'J00561' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # PneumTbletHoprDoorC1
-                    if 'J00072' in updated_fields or 'J00072' in updated_var_names:
+                    if 'J00072' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC1Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC1Open-J00072:{globals()['J00072']}")
-                    if 'J00073' in updated_fields or 'J00073' in updated_var_names:
+                    if 'J00073' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC1Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC1Close-J00073:{globals()['J00073']}")
                     if 'I00216' in updated_fields or 'I00217' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK034)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK034-I00216:{globals()['I00216']}")
-                    if 'J00530' in updated_fields or 'J00530' in updated_var_names:
+                    if 'J00530' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC1Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorC1Fault")
-                    if 'J00562' in updated_fields or 'J00562' in updated_var_names:
+                    if 'J00562' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # PneumTbletHoprDoorC2
-                    if 'J00074' in updated_fields or 'J00074' in updated_var_names:
+                    if 'J00074' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC2Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC2Open-J00074:{globals()['J00074']}")
-                    if 'J00075' in updated_fields or 'J00075' in updated_var_names:
+                    if 'J00075' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC2Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC2Close-J00075:{globals()['J00075']}")
                     if 'I00218' in updated_fields or 'I00219' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK035)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK035-I00218:{globals()['I00218']}")
-                    if 'J00531' in updated_fields or 'J00531' in updated_var_names:
+                    if 'J00531' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC2Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorC2Fault")
-                    if 'J00563' in updated_fields or 'J00563' in updated_var_names:
+                    if 'J00563' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # PneumTbletHoprDoorC3
-                    if 'J00076' in updated_fields or 'J00076' in updated_var_names:
+                    if 'J00076' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC3Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC3Open-J00076:{globals()['J00076']}")
-                    if 'J00077' in updated_fields or 'J00077' in updated_var_names:
+                    if 'J00077' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC3Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC3Close-J00077:{globals()['J00077']}")
                     if 'I00220' in updated_fields or 'I00221' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK036)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK036-I00220:{globals()['I00220']}")
-                    if 'J00532' in updated_fields or 'J00532' in updated_var_names:
+                    if 'J00532' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC3Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorC3Fault")
-                    if 'J00564' in updated_fields or 'J00564' in updated_var_names:
+                    if 'J00564' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # PneumTbletHoprDoorC4
-                    if 'J00078' in updated_fields or 'J00078' in updated_var_names:
+                    if 'J00078' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC4Open)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC4Open-J00078:{globals()['J00078']}")
-                    if 'J00079' in updated_fields or 'J00079' in updated_var_names:
+                    if 'J00079' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC4Close)
                         globals()['queueToCallText'].append(f"{counterAntrian}-PneumTbletHoprDoorC4Close-J00079:{globals()['J00079']}")
                     if 'I00222' in updated_fields or 'I00223' in updated_fields: # Not target I-keys
                         globals()['queueToCall'].append(TimerK037)
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK037-I00222:{globals()['I00222']}")
-                    if 'J00533' in updated_fields or 'J00533' in updated_var_names:
+                    if 'J00533' in updated_fields:
                         globals()['queueToCall'].append(PneumTbletHoprDoorC4Fault)
                         globals()['queueToCallText'].append("PneumTbletHoprDoorC4Fault")
-                    if 'J00565' in updated_fields or 'J00565' in updated_var_names:
+                    if 'J00565' in updated_fields:
                         globals()['queueToCall'].append(errBuzzUpdated)
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
@@ -2214,27 +2007,23 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK060-I00095:{globals()['I00095']}")
 
                     # Line C - Feeder Auto
-                    if 'V0146' in updated_fields or 'J00203' in updated_fields or 'J00204' in updated_fields or 'J00205' in updated_fields or 'J00206' in updated_fields or 'J00207' in updated_fields or \
-                       'J00203' in updated_var_names or 'J00204' in updated_var_names or 'J00205' in updated_var_names or 'J00206' in updated_var_names or 'J00207' in updated_var_names:
+                    if 'V0146' in updated_fields or 'J00203' in updated_fields or 'J00204' in updated_fields or 'J00205' in updated_fields or 'J00206' in updated_fields or 'J00207' in updated_fields:
                         globals()['queueToCall'].append(autoFeederLineC)
                         globals()['queueToCallText'].append(f"{counterAntrian}-autoFeederLineC")
                     if 'V0154' in updated_fields:
                         globals()['queueToCall'].append(V0154change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-V0154change")
-                    if 'J00208' in updated_fields or 'J00209' in updated_fields or 'J00210' in updated_fields or \
-                       'J00208' in updated_var_names or 'J00209' in updated_var_names or 'J00210' in updated_var_names:
+                    if 'J00208' in updated_fields or 'J00209' in updated_fields or 'J00210' in updated_fields:
                         globals()['queueToCall'].append(J00208change)
                         globals()['queueToCallText'].append(f"{counterAntrian}-J00208change")
 
                     # Fill Mixer Line C
-                    if 'J00057' in updated_fields or 'J00410' in updated_fields or 'J00250' in updated_fields or 'J00251' in updated_fields or \
-                       'J00057' in updated_var_names or 'J00410' in updated_var_names or 'J00250' in updated_var_names or 'J00251' in updated_var_names:
+                    if 'J00057' in updated_fields or 'J00410' in updated_fields or 'J00250' in updated_fields or 'J00251' in updated_fields:
                         globals()['queueToCall'].append(FillerMixerCLogic)
                         globals()['queueToCallText'].append(f"{counterAntrian}-FillerMixerCLogic")
 
                     # Dump Mixer Line C
-                    if 'J00058' in updated_fields or 'J00254' in updated_fields or 'J00249' in updated_fields or \
-                       'J00058' in updated_var_names or 'J00254' in updated_var_names or 'J00249' in updated_var_names:
+                    if 'J00058' in updated_fields or 'J00254' in updated_fields or 'J00249' in updated_fields:
                         globals()['queueToCall'].append(DumpMixerCLogic)
                         globals()['queueToCallText'].append(f"{counterAntrian}-DumpMixerCLogic")
 
@@ -2242,13 +2031,12 @@ def listenTriggerMongoDB():
                     if 'I00208' in updated_fields: # Not target I-key
                         globals()['queueToCall'].append([TimerK043, globals()['I00208']])
                         globals()['queueToCallText'].append(f"{counterAntrian}-TimerK043")
-                    if 'J00249' in updated_fields or 'J00249' in updated_var_names:
+                    if 'J00249' in updated_fields:
                         globals()['queueToCall'].append(ResetTimerK043)
                         globals()['queueToCallText'].append(f"{counterAntrian}-ResetTimerK043")
 
                     # Line C - Hopper Auto
-                    if 'V0147' in updated_fields or 'J00198' in updated_fields or 'J00199' in updated_fields or 'J00200' in updated_fields or 'J00201' in updated_fields or 'J00202' in updated_fields or \
-                       'J00198' in updated_var_names or 'J00199' in updated_var_names or 'J00200' in updated_var_names or 'J00201' in updated_var_names or 'J00202' in updated_var_names:
+                    if 'V0147' in updated_fields or 'J00198' in updated_fields or 'J00199' in updated_fields or 'J00200' in updated_fields or 'J00201' in updated_fields or 'J00202' in updated_fields:
                         globals()['queueToCall'].append(autoHopperLineC)
                         globals()['queueToCallText'].append(f"{counterAntrian}-autoHopperLineC")
 
@@ -2264,7 +2052,6 @@ def listenTriggerMongoDB():
                         globals()['queueToCallText'].append("errBuzzUpdated")
 
                     # AntrianLBL.configure(text="\n".join(queueToCallText))
-                    # updated_queue, updated_var_names = processQueue()
 
                 except KeyError as e:
                     print(f"Error accessing updated fields: {e}")
@@ -2272,6 +2059,7 @@ def listenTriggerMongoDB():
 
 # EMERGENCY CODE
 def StopAllBecauseEmergencyStop():
+    print('Emg Trigger')
     print("--->1")
     globals()['V0144'] = 0
     print("--->2")
@@ -2301,34 +2089,33 @@ def StopAllBecauseEmergencyStop():
 
     # Line B
     print("--->7")
-    MotorMaterMixRotorB0()
-    MotorMatScrewCnvyrB0()
+    MoveCtrl_MotorMaterMixRotorB0()
+    MoveCtrl_MotorMatScrewCnvyrB0()
     print("--->8")
-    MotorMateriVbratorB0()
-    MotorToRotaryCnvyrB0()
-    MotorFrmRtaryCnvyrB0()
-    MotorUpladderCnvyrB0()
-    MotorToHopperCnvyrB0()
+    StartNStop_MotorMateriVbratorB0()
+    StartNStop_MotorToRotaryCnvyrB0()
+    StartNStop_MotorFrmRtaryCnvyrB0()
+    StartNStop_MotorUpladderCnvyrB0()
+    StartNStop_MotorToHopperCnvyrB0()
     print("--->9")
-    PneumMaterMixDoorB0Close()
-    PneumMaterMixDoorB0Open()
-    PneumToRotaryCnvyrB0()
-    PneumToRotaryCnvyrB1()
-    PneumToRotaryCnvyrB2()
-    PneumToRotaryCnvyrB3()
-    PneumToRotaryCnvyrB4()
-    PneumToHopperCnvyrB0()
-    PneumToHopperCnvyrB1()
-    PneumToHopperCnvyrB2()
-    PneumToHopperCnvyrB3()
-    MotorTbletHoprDoorB0()
-    MotorToRncenCnvyrB0()
+    OpenClose_PneumMaterMixDoorB0()
+    Close_PneumToRotaryCnvyrB0()
+    Close_PneumToRotaryCnvyrB2()
+    Close_PneumToRotaryCnvyrB1()
+    Close_PneumToRotaryCnvyrB3()
+    Close_PneumToRotaryCnvyrB4()
+    Close_PneumToHopperCnvyrB0()
+    Close_PneumToHopperCnvyrB1()
+    Close_PneumToHopperCnvyrB2()
+    Close_PneumToHopperCnvyrB3()
+    StartNStop_MotorTbletHoprDoorB0()
+    StartNStop_MotorToRncenCnvyrB0()
     print("--->10")
     # PneumTbletHoprDoorB0Close()
-    PneumTbletHoprDoorB0Open()
+    Open_PneumTbletHoprDoorB0Open()
     # PneumTbletHoprDoorB1Close()
-    PneumTbletHoprDoorB1Open()
-    PneumToRncenCnvyrB0()
+    Open_PneumTbletHoprDoorB1Open()
+    Close_PneumToRncenCnvyrB0()
     print("--->11")
     # Line C
     MotorMaterMixRotorC0DoFwd()
@@ -2579,62 +2366,62 @@ def DoOpenZ1():
 def ToLineBhld():
     globals()['J00303'] = bool((globals()['I00255'] and (globals()['J00399'] or globals()['J00047'])) or ((globals()['J00399'] or globals()['J00047']) and globals()['I00252']))
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00303': bool(globals()['J00303'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00303': bool(globals()['J00303'])
+        }})
         
     setOutputToRLY()
 
 def J00176func():
     globals()['J00176'] = bool(globals()['I00061'] and globals()['I00063'])
     
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00176': bool(globals()['J00176'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00176': bool(globals()['J00176'])
+        }})
     
 def J00175func():
     globals()['J00175'] = bool(globals()['I00060'] and globals()['I00063'])
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00175': bool(globals()['J00175'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00175': bool(globals()['J00175'])
+        }})
 
 def J00174func():
     globals()['J00174'] = bool(globals()['I00061'] and globals()['I00062'])
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00174': bool(globals()['J00174'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00174': bool(globals()['J00174'])
+        }})
 
 def J00302func():
     globals()['J00302'] = frame2or4and2or(globals()['I00254'], globals()['J00398'], globals()['J00046'], globals()['I00253'])
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00302': bool(globals()['J00302'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00302': bool(globals()['J00302'])
+        }})
 
 def J00304func():
     globals()['J00304'] = frame2or4and2or(globals()['I00253'], globals()['J00400'], globals()['J00048'], globals()['I00255'])
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00304': bool(globals()['J00304'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00304': bool(globals()['J00304'])
+        }})
 
 def J00303func():
     globals()['J00303'] = frame2or4and2or(globals()['I00255'], globals()['J00399'], globals()['J00047'], globals()['I00252'])
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00303': bool(globals()['J00303'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00303': bool(globals()['J00303'])
+        }})
 
 def V0149func():
     # if not globals()['V0149'] == 0:
@@ -2652,22 +2439,20 @@ def V0149func():
     # Stop Timer Mixing B
         print("TimerK011 STOP")
         stop_timer("J00245")
-        globals()['J00245'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00245': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00245': False
+            }})
         
     # Stop Timer Mixing C
         print("TimerK043 STOP - V0149func")
         stop_timer("J00251")
-        globals()['J00251'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00251': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00251': False
+            }})
 
 def commonAuto():
 
@@ -2677,44 +2462,44 @@ def commonAuto():
     if globals()['V0149'] == 4194304:
         globals()['J00410'] = True 
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00410': True
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00410': True
+            }})
         print(f"while J00174 ON")
         while not globals()['J00174']:
             globals()['J00399'] = False
             globals()['J00400'] = False
             globals()['J00398'] = True 
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00399': False,
-            #         'J00400': False,
-            #         'J00398': True
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00399': False,
+                    'J00400': False,
+                    'J00398': True
+                }})
         
         print(f"exit while J00174 : True")
         globals()['J00410'] = False 
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00410': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00410': False
+            }})
 
         elseCommonAuto()
             
     elif globals()['V0149'] == 8388608:
         globals()['J00389'] = True 
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00389': True
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00389': True
+            }})
 
         print("masuk ke Auto Line B - WHILE J00175isLine B False")
         while not globals()['J00175']:
@@ -2729,23 +2514,23 @@ def commonAuto():
             #         'J00175': True
             #     }})
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00398': False,
-            #         'J00400': False,
-            #         'J00399': True
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00398': False,
+                    'J00400': False,
+                    'J00399': True
+                }})
         
         print("EXIT WHILE J00175isLine B : True")
 
         globals()['J00410'] = False 
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00410': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00410': False
+            }})
 
         elseCommonAuto()
 
@@ -2755,13 +2540,13 @@ def commonAuto():
             globals()['J00399'] = False
             globals()['J00400'] = True 
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00398': False,
-            #         'J00399': False,
-            #         'J00400': True
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00398': False,
+                    'J00399': False,
+                    'J00400': True
+                }})
         
         elseCommonAuto()
 
@@ -2773,38 +2558,37 @@ def elseCommonAuto():
     globals()['J00399'] = False
     globals()['J00400'] = False 
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00398': False,
-    #         'J00399': False,
-    #         'J00400': False
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00398': False,
+            'J00399': False,
+            'J00400': False
+        }})
 # END LOGIC CODE LINE COMMON
 
 # LOGIC CODE LINE B - MANUAL AUTO
 def MotorMaterMixRotorB0Fault():
-    MotorMaterMixRotorB0()
+    MoveCtrl_MotorMaterMixRotorB0()
 
 def MotorMatScrewCnvyrB0Fault():
-    MotorMatScrewCnvyrB0
+    MoveCtrl_MotorMatScrewCnvyrB0
 
 def PneumMaterMixDoorB0Fault():
     errBuzzUpdated()
-    PneumMaterMixDoorB0Open()
-    PneumMaterMixDoorB0Close()
+    OpenClose_PneumMaterMixDoorB0()
 
 def PneumTbletHoprDoorB0Fault():
     errBuzzUpdated()
-    PneumTbletHoprDoorB0Open()
+    Open_PneumTbletHoprDoorB0Open()
     # PneumTbletHoprDoorB0Close()
 
 def PneumTbletHoprDoorB1Fault():
     errBuzzUpdated()
-    PneumTbletHoprDoorB1Open()
+    Open_PneumTbletHoprDoorB1Open()
     # PneumTbletHoprDoorB1Close()
 
-def MoveCtrlMotor(target_var1,target_var2,target_var3,in1,in2,in3,in4,in5,in6,in7,in8,in9,in10):
+def MoveCtrlLogicFunc(target_var1,target_var2,target_var3,in1,in2,in3,in4,in5,in6,in7,in8,in9,in10):
     val1 = globals().get(in1, False)
     val2 = globals().get(in2, False)
     val3 = globals().get(in3, False)
@@ -2833,11 +2617,11 @@ def MoveCtrlMotor(target_var1,target_var2,target_var3,in1,in2,in3,in4,in5,in6,in
     
     setOutputToRLY()
 
-def MotorMatScrewCnvyrB0():
-    MoveCtrlMotor('I00147','I00149','I00148','I00032','J00543','J00518','V0144','J00368','J00016','J00290','J00369','J00017','J00291')
+def MoveCtrl_MotorMatScrewCnvyrB0():
+    MoveCtrlLogicFunc('I00147','I00149','I00148','I00032','J00543','J00518','V0144','J00368','J00016','J00290','J00369','J00017','J00291')
 
-def MotorMaterMixRotorB0():
-    MoveCtrlMotor('I00144','I00146','I00145','I00028','J00543','J00516','V0149','J00352','J00000','J00288','J00353','J00001',"J00289")
+def MoveCtrl_MotorMaterMixRotorB0():
+    MoveCtrlLogicFunc('I00144','I00146','I00145','I00028','J00543','J00516','V0149','J00352','J00000','J00288','J00353','J00001',"J00289")
 
 # def TimerK015(val):
 #     if val:
@@ -2970,108 +2754,146 @@ def MotorMaterMixRotorB0():
     
 #     setOutputToRLY()
 
-def MotorMateriVbratorB0():
+def StartNStopFunc(target_var1, target_var2, in1, in2, in3, in4, in5, in6):
+    val1 = globals().get(in1)
+    val2 = globals().get(in2)
+    val3 = globals().get(in3)
+    val4 = globals().get(in4)
+    val5 = globals().get(in5)
+    val5 = globals().get(in5)
+    val6 = globals().get(in6)
 
-    globals()['I00130'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00517'], globals()['V0144'], globals()['J00356'], globals()['J00004'])
-    globals()['I00131'] = not globals()['I00130']
+    # Call your StartNStop function with these inputs
+    resultStartNStop = StartNStopLogic(val1, val2, val3, val4, val5, val6)
 
-    setOutputToRLY()
-
-def MotorToRotaryCnvyrB0():
-
-    globals()['I00132'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00519'], globals()['V0144'], globals()['J00357'], globals()['J00005'])
-    globals()['I00133'] = not globals()['I00132']
-
+    # Update the output global variable and MongoDB
+    globals()[target_var1] = resultStartNStop.get('out1')
+    globals()[target_var2] = resultStartNStop.get('out2')
     collection.update_one(
         {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00132': bool(globals()['I00132']),
-            'I00133': bool(globals()['I00133'])
-        }})
+        {'$set': 
+         {target_var1: bool(globals()[target_var1]),
+          target_var2: bool(globals()[target_var2]
+        )}}
+    )
 
-    setOutputToRLY()
+def StartNStop_MotorMateriVbratorB0():
+    StartNStopFunc('I00130','I00131','I00032','J00543','J00517','V0144','J00356','J00004')
+def StartNStop_MotorToRotaryCnvyrB0():
+    StartNStopFunc('I00132','I00133','I00032','J00543','J00519','V0144','J00357','J00004')
+def StartNStop_MotorFrmRtaryCnvyrB0():
+    StartNStopFunc('I00160','I00161','I00032','J00543','J00520','V0144','J00384','J00032')
+def StartNStop_MotorUpladderCnvyrB0():
+    StartNStopFunc('I00162','I00163','I00032','J00543','J00521','V0144','J00385','J00033')
+def StartNStop_MotorToHopperCnvyrB0():
+    StartNStopFunc('I00150','I00151','I00032','J00543','J00522','V0144','J00370','J00018')
+def StartNStop_MotorTbletHoprDoorB0():
+    StartNStopFunc('I00168','I00169','I00032','J00543','J00515','V0145','J00383','J00031')
+def StartNStop_MotorToRncenCnvyrB0():
+    StartNStopFunc('I00170','I00171','I00032','J00543','J00523','V0145','J00386','J00034')
 
-def MotorFrmRtaryCnvyrB0():
+# def MotorMateriVbratorB0():
 
-    globals()['I00160'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00520'], globals()['V0144'], globals()['J00384'], globals()['J00032'])
-    globals()['I00161'] = not globals()['I00160']
+#     globals()['I00130'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00517'], globals()['V0144'], globals()['J00356'], globals()['J00004'])
+#     globals()['I00131'] = not globals()['I00130']
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00160': bool(globals()['I00160']),
-            'I00161': bool(globals()['I00161'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorToRotaryCnvyrB0():
 
-def MotorUpladderCnvyrB0():
+#     globals()['I00132'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00519'], globals()['V0144'], globals()['J00357'], globals()['J00005'])
+#     globals()['I00133'] = not globals()['I00132']
 
-    globals()['I00162'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00521'], globals()['V0144'], globals()['J00385'], globals()['J00033'])
-    globals()['I00163'] = not globals()['I00162']
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00132': bool(globals()['I00132']),
+#             'I00133': bool(globals()['I00133'])
+#         }})
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00162': bool(globals()['I00162']),
-            'I00163': bool(globals()['I00163'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorFrmRtaryCnvyrB0():
 
-def MotorToHopperCnvyrB0():
+#     globals()['I00160'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00520'], globals()['V0144'], globals()['J00384'], globals()['J00032'])
+#     globals()['I00161'] = not globals()['I00160']
 
-    globals()['I00150'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00522'], globals()['V0144'], globals()['J00370'], globals()['J00018'])
-    globals()['I00151'] = not globals()['I00150']
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00160': bool(globals()['I00160']),
+#             'I00161': bool(globals()['I00161'])
+#         }})
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00150': bool(globals()['I00150']),
-            'I00151': bool(globals()['I00151'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorUpladderCnvyrB0():
 
-def MotorTbletHoprDoorB0():
+#     globals()['I00162'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00521'], globals()['V0144'], globals()['J00385'], globals()['J00033'])
+#     globals()['I00163'] = not globals()['I00162']
 
-    globals()['I00168'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00515'], globals()['V0145'], globals()['J00383'], globals()['J00031'])
-    globals()['I00169'] = not globals()['I00168']
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00162': bool(globals()['I00162']),
+#             'I00163': bool(globals()['I00163'])
+#         }})
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00168': bool(globals()['I00168']),
-            'I00169': bool(globals()['I00169'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorToHopperCnvyrB0():
 
-def MotorToRncenCnvyrB0():
+#     globals()['I00150'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00522'], globals()['V0144'], globals()['J00370'], globals()['J00018'])
+#     globals()['I00151'] = not globals()['I00150']
 
-    globals()['I00170'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00523'], globals()['V0145'], globals()['J00386'], globals()['J00034'])
-    globals()['I00171'] = not globals()['I00170']
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00150': bool(globals()['I00150']),
+#             'I00151': bool(globals()['I00151'])
+#         }})
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00170': bool(globals()['I00170']),
-            'I00171': bool(globals()['I00171'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorTbletHoprDoorB0():
 
-def PneumToRotaryCnvyrB0():
+#     globals()['I00168'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00515'], globals()['V0145'], globals()['J00383'], globals()['J00031'])
+#     globals()['I00169'] = not globals()['I00168']
 
-    globals()['I00135'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00359'], globals()['J00007'])
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00168': bool(globals()['I00168']),
+#             'I00169': bool(globals()['I00169'])
+#         }})
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00135': bool(globals()['I00135'])
-        }})
+#     setOutputToRLY()
 
-    setOutputToRLY()
+# def MotorToRncenCnvyrB0():
+
+#     globals()['I00170'] = frame4and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00523'], globals()['V0145'], globals()['J00386'], globals()['J00034'])
+#     globals()['I00171'] = not globals()['I00170']
+
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00170': bool(globals()['I00170']),
+#             'I00171': bool(globals()['I00171'])
+#         }})
+
+#     setOutputToRLY()
+
+# def Close_PneumToRotaryCnvyrB0():
+
+#     globals()['I00135'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00359'], globals()['J00007'])
+
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00135': bool(globals()['I00135'])
+#         }})
+
+#     setOutputToRLY()
 
 def TimerK016(val):
     if val:
@@ -3084,21 +2906,21 @@ def TimerK016(val):
         globals()['J00135'] = False
         stop_timer("J00135")
         globals()['K016'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00135': bool(globals()['J00135'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00135': bool(globals()['J00135'])
+            }})
 
-def PneumToRotaryCnvyrB1():
+# def Close_PneumToRotaryCnvyrB1():
 
-    globals()['I00137'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00361'], globals()['J00009'])
+#     globals()['I00137'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00361'], globals()['J00009'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00137': bool(globals()['I00137'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00137': bool(globals()['I00137'])
+#         }})
 
     setOutputToRLY()
 
@@ -3113,23 +2935,23 @@ def TimerK017(val):
         globals()['J00136'] = False
         stop_timer("J00136")
         globals()['K017'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00136': bool(globals()['J00136'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00136': bool(globals()['J00136'])
+            }})
 
-def PneumToRotaryCnvyrB2():
+# def Close_PneumToRotaryCnvyrB2():
 
-    globals()['I00139'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00363'], globals()['J00011'])
+#     globals()['I00139'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00363'], globals()['J00011'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00139': bool(globals()['I00139'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00139': bool(globals()['I00139'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK018(val):
     if val:
@@ -3142,23 +2964,23 @@ def TimerK018(val):
         globals()['J00137'] = False
         stop_timer("J00137")
         globals()['K018'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00137': bool(globals()['J00137'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00137': bool(globals()['J00137'])
+            }})
 
-def PneumToRotaryCnvyrB3():
+# def Close_PneumToRotaryCnvyrB3():
 
-    globals()['I00141'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00365'], globals()['J00013'])
+#     globals()['I00141'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00365'], globals()['J00013'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00141': bool(globals()['I00141'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00141': bool(globals()['I00141'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK019(val):
     if val:
@@ -3171,26 +2993,26 @@ def TimerK019(val):
         globals()['J00138'] = False
         stop_timer("J00138")
         globals()['K019'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00138': bool(globals()['J00138'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00138': bool(globals()['J00138'])
+            }})
 
-def PneumToRotaryCnvyrB4():
+# def Close_PneumToRotaryCnvyrB4():
 
-    globals()['I00143'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00367'], globals()['J00015'])
+#     globals()['I00143'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00367'], globals()['J00015'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00143': bool(globals()['I00143'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00143': bool(globals()['I00143'])
+#         }})
 
-    print ('I00143:', globals()['I00143'])
-    print (globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00367'], globals()['J00015'])
+#     print ('I00143:', globals()['I00143'])
+#     print (globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00367'], globals()['J00015'])
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK020(val):
     if val:
@@ -3203,23 +3025,62 @@ def TimerK020(val):
         globals()['J00139'] = False
         stop_timer("J00139")
         globals()['K020'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00139': bool(globals()['J00139'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00139': bool(globals()['J00139'])
+            }})
 
-def PneumToHopperCnvyrB0():
+def CloseLogicFunc(target_var, in1, in2, in3, in4, in5):
+    # Retrieve input values safely from globals, defaulting to False if missing
+    val1 = globals().get(in1)
+    val2 = globals().get(in2)
+    val3 = globals().get(in3)
+    val4 = globals().get(in4)
+    val5 = globals().get(in5)
 
-    globals()['I00153'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00372'], globals()['J00020'])
+    # Call your CloseLogic function with these inputs
+    ResultCloseLogic = CloseLogic(val1, val2, val3, val4, val5)
+    globals()[target_var]  = ResultCloseLogic.get('out1')
 
+    # Update the output global variable and MongoDB
     collection.update_one(
         {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00153': bool(globals()['I00153'])
-        }})
+        {'$set': {target_var: bool(globals()[target_var])}}
+    )
 
-    setOutputToRLY()
+def Close_PneumToRotaryCnvyrB0():
+     CloseLogicFunc('I00135', 'I00032', 'J00543', 'V0144', 'J00359', 'J00007')
+def Close_PneumToRotaryCnvyrB1():
+     CloseLogicFunc('I00137', 'I00032', 'J00543', 'V0144', 'J00361', 'J00009')
+def Close_PneumToRotaryCnvyrB2():
+     CloseLogicFunc('I00139', 'I00032', 'J00543', 'V0144', 'J00363', 'J00011')
+def Close_PneumToRotaryCnvyrB3():
+     CloseLogicFunc('I00141', 'I00032', 'J00543', 'V0144', 'J00365', 'J00013')
+def Close_PneumToRotaryCnvyrB4():
+     CloseLogicFunc('I00143', 'I00032', 'J00543', 'V0144', 'J00367', 'J00015')
+def Close_PneumToRncenCnvyrB0():
+     CloseLogicFunc('I00173','I00032','J00543','V0145','J00388','J00036')
+def Close_PneumToHopperCnvyrB0():
+     CloseLogicFunc('I00153', 'I00032', 'J00543', 'V0144', 'J00372', 'J00020')
+def Close_PneumToHopperCnvyrB1():
+     CloseLogicFunc('I00155', 'I00032', 'J00543', 'V0144', 'J00374', 'J00022')
+def Close_PneumToHopperCnvyrB2():
+     CloseLogicFunc('I00157', 'I00032', 'J00543', 'V0144', 'J00376', 'J00024')
+def Close_PneumToHopperCnvyrB3():
+     CloseLogicFunc('I00159', 'I00032', 'J00543', 'V0144', 'J00378', 'J00026')
+
+# def PneumToHopperCnvyrB0():
+
+#     globals()['I00153'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00372'], globals()['J00020'])
+
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00153': bool(globals()['I00153'])
+#         }})
+
+#     setOutputToRLY()
 
 def TimerK021(val):
     if val:
@@ -3232,23 +3093,23 @@ def TimerK021(val):
         globals()['J00140'] = False
         stop_timer("J00140")
         globals()['K021'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00140': bool(globals()['J00140'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00140': bool(globals()['J00140'])
+            }})
 
-def PneumToHopperCnvyrB1():
+# def PneumToHopperCnvyrB1():
 
-    globals()['I00155'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00374'], globals()['J00022'])
+#     globals()['I00155'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00374'], globals()['J00022'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00155': bool(globals()['I00155'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00155': bool(globals()['I00155'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK022(val):
     if val:
@@ -3261,23 +3122,23 @@ def TimerK022(val):
         globals()['J00141'] = False
         stop_timer("J00141")
         globals()['K022'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00141': bool(globals()['J00141'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00141': bool(globals()['J00141'])
+            }})
 
-def PneumToHopperCnvyrB2():
+# def PneumToHopperCnvyrB2():
 
-    globals()['I00157'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00376'], globals()['J00024'])
+#     globals()['I00157'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00376'], globals()['J00024'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00157': bool(globals()['I00157'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00157': bool(globals()['I00157'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK023(val):
     if val:
@@ -3290,23 +3151,23 @@ def TimerK023(val):
         globals()['J00142'] = False
         stop_timer("J00142")
         globals()['K023'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00142': bool(globals()['J00142'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00142': bool(globals()['J00142'])
+            }})
 
-def PneumToHopperCnvyrB3():
+# def PneumToHopperCnvyrB3():
 
-    globals()['I00159'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00378'], globals()['J00026'])
+#     globals()['I00159'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0144'], globals()['J00378'], globals()['J00026'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00159': bool(globals()['I00159'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00159': bool(globals()['I00159'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK024(val):
     if val:
@@ -3319,38 +3180,68 @@ def TimerK024(val):
         globals()['J00143'] = False
         stop_timer("J00143")
         globals()['K024'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00143': bool(globals()['J00143'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00143': bool(globals()['J00143'])
+            }})
 
-def PneumMaterMixDoorB0Open():
+def OpenCloseLogicFunc(target_var1,target_var2, in1, in2, in3, in4, in5, in6,in7,in8,in9,in10,in11,in12 ):
+    val1 = globals().get(in1)
+    val2 = globals().get(in2)
+    val3 = globals().get(in3)
+    val4 = globals().get(in4)
+    val5 = globals().get(in5)
+    val5 = globals().get(in5)
+    val6 = globals().get(in6)
+    val7 = globals().get(in7)
+    val8 = globals().get(in8)
+    val9 = globals().get(in9)
+    val10 = globals().get(in10)
+    val11 = globals().get(in11)
+    val12= globals().get(in12)
 
-    globals()['I00128'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001'])
+    resultOpenCloseLogic = OpenCloseLogic(val1,val2,val3,val4,val5,val6,val7,val8,val9,val10,val11,val12)
 
+    # Update the output global variable and MongoDB
+    globals()[target_var1] = resultOpenCloseLogic.get('out1')
+    globals()[target_var1] = resultOpenCloseLogic.get('out2')  
     collection.update_one(
         {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00128': bool(globals()['I00128'])
-        }})
+        {'$set': 
+         {target_var1: bool(globals()[target_var1]),
+          target_var2: bool(globals()[target_var2])}}
+    )
+
+def OpenClose_PneumMaterMixDoorB0():
+    OpenCloseLogicFunc('I00128','I00129','I00032','J00543','J00512','V0144','J00354','J00002','I00129','I00001','J00355','J00003','I000128','I00002')
+
+# def PneumMaterMixDoorB0Open():
+
+#     globals()['I00128'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001'])
+
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00128': bool(globals()['I00128'])
+#         }})
         
-    # print(f"buka pintu matermix B: {globals()['I00128']}")   
-    # print(f"globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001']\n{globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001']}")
-    setOutputToRLY()
+#     # print(f"buka pintu matermix B: {globals()['I00128']}")   
+#     # print(f"globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001']\n{globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00354'], globals()['J00002'], globals()['I00129'], globals()['I00001']}")
+#     setOutputToRLY()
 
-def PneumMaterMixDoorB0Close():     
+# def PneumMaterMixDoorB0Close():     
 
-    globals()['I00129'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00355'], globals()['J00003'], globals()['I00128'], globals()['I00002'])
+#     globals()['I00129'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00512'], globals()['V0144'], globals()['J00355'], globals()['J00003'], globals()['I00128'], globals()['I00002'])
 
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00129': bool(globals()['I00129'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00129': bool(globals()['I00129'])
+#         }})
     
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK000():
     # Timer Berjalan
@@ -3364,34 +3255,60 @@ def TimerK000():
         print("jidTimerK000 STOOOP")
         stop_timer("K000V0000IsJam")
 
-def PneumTbletHoprDoorB0Open():
-    print("trigger Hopper 2 open On")
+def OpenLogicFunc(target_var1, in1, in2, in3, in4, in5, in6):
+    val1 = globals().get(in1, False)
+    val2 = globals().get(in2, False)
+    val3 = globals().get(in3, False)
+    val4 = globals().get(in4, False)
+    val5 = globals().get(in5, False)
+    val5 = globals().get(in5, False)
+    val6 = globals().get(in6, False)
 
-    globals()['I00164'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00379'], globals()['J00027'], globals()['I00165'], globals()['I00020'])
+    # Call your OpenLgic function with these inputs
+    resultOpenLogic = OpenLogic(val1, val2, val3, val4, val5, val6)
 
+    # Update the output global variable and MongoDB
+    globals()[target_var1] = resultOpenLogic.get('out1') 
     collection.update_one(
         {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00164': bool(globals()['I00164'])
-        }})
+        {'$set': 
+         {target_var1: bool(globals()[target_var1])}}
+    )
+
+def Open_PneumTbletHoprDoorB0Open():
+    OpenLogicFunc('I00164','I00032','J00543','J00513','V0145','J00379','J00027')
+
+def Open_PneumTbletHoprDoorB1Open():
+    OpenLogicFunc('I00166','I00032','J00543','J00514','V0145','J00381','J00029')
+
+# def PneumTbletHoprDoorB0Open():
+#     print("trigger Hopper 2 open On")
+
+#     globals()['I00164'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00379'], globals()['J00027'], globals()['I00165'], globals()['I00020'])
+
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00164': bool(globals()['I00164'])
+#         }})
         
-    setOutputToRLY()
-    print("silo2",globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00379'], globals()['J00027'], globals()['I00165'], globals()['I00020'])
+#     setOutputToRLY()
+#     print("silo2",globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00379'], globals()['J00027'], globals()['I00165'], globals()['I00020'])
 
-def PneumTbletHoprDoorB0Close():
+# def PneumTbletHoprDoorB0Close():
 
-    print("trigger Hopper 2  close On")     
+#     print("trigger Hopper 2  close On")     
 
-    globals()['I00165'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00380'], globals()['J00028'], globals()['I00164'], globals()['I00021'])
+#     globals()['I00165'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00513'], globals()['V0145'], globals()['J00380'], globals()['J00028'], globals()['I00164'], globals()['I00021'])
 
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00165': bool(globals()['I00165'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00165': bool(globals()['I00165'])
+#         }})
     
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK001():
     # Timer Berjalan
@@ -3405,35 +3322,35 @@ def TimerK001():
         print("jidTimerK001 STOOOP")
         stop_timer("K001V0001IsJam")
 
-def PneumTbletHoprDoorB1Open():
+# def PneumTbletHoprDoorB1Open():
 
-    print("trigger Hopper 1 open On")
+#     print("trigger Hopper 1 open On")
 
-    globals()['I00166'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00381'], globals()['J00029'], globals()['I00167'], globals()['I00022'])
+#     globals()['I00166'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00381'], globals()['J00029'], globals()['I00167'], globals()['I00022'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00166': bool(globals()['I00166'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00166': bool(globals()['I00166'])
+#         }})
         
-    setOutputToRLY()
-    print("silo1",globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00381'], globals()['J00029'], globals()['I00167'], globals()['I00022'])
+#     setOutputToRLY()
+#     print("silo1",globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00381'], globals()['J00029'], globals()['I00167'], globals()['I00022'])
 
-def PneumTbletHoprDoorB1Close():     
+# def PneumTbletHoprDoorB1Close():     
 
-    print("trigger Hopper 2 close On")
+#     print("trigger Hopper 2 close On")
     
-    globals()['I00167'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00382'], globals()['J00030'], globals()['I00166'], globals()['I00023'])
+#     globals()['I00167'] = frame6and2or4and(globals()['I00032'], globals()['J00543'], globals()['J00514'], globals()['V0145'], globals()['J00382'], globals()['J00030'], globals()['I00166'], globals()['I00023'])
 
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00167': bool(globals()['I00167'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00167': bool(globals()['I00167'])
+#         }})
     
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK002():
     # Timer Berjalan
@@ -3447,17 +3364,17 @@ def TimerK002():
         print("jidTimerK002 STOOOP")
         stop_timer("K002V0002IsJam")
 
-def PneumToRncenCnvyrB0():
+# def PneumToRncenCnvyrB0():
 
-    globals()['I00173'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0145'], globals()['J00388'], globals()['J00036'])
+#     globals()['I00173'] = frame3and2or4and(globals()['I00032'], globals()['J00543'], globals()['V0145'], globals()['J00388'], globals()['J00036'])
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'I00173': bool(globals()['I00173'])
-        }})
+#     collection.update_one(
+#         {'_id': ObjectId(objID)},
+#         {'$set': {
+#             'I00173': bool(globals()['I00173'])
+#         }})
 
-    setOutputToRLY()
+#     setOutputToRLY()
 
 def TimerK025(val):
     if val:
@@ -3470,11 +3387,11 @@ def TimerK025(val):
         globals()['J00144'] = False
         stop_timer("J00144")
         globals()['K025'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00144': bool(globals()['J00144'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00144': bool(globals()['J00144'])
+            }})
 
 def TimerK026(val):
     if val:
@@ -3487,258 +3404,154 @@ def TimerK026(val):
         globals()['J00145'] = False
         stop_timer("J00145")
         globals()['K026'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00145': bool(globals()['J00145'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00145': bool(globals()['J00145'])
+            }})
 
 def autoFeederLineB():
-    if globals()['V0144'] == 32768:
-        print("feeder B putih")
-        if not globals()['K021']:
-        
-            globals()['J00372'] = True
-            globals()['J00374'] = False
-            globals()['J00376'] = False
-            globals()['J00378'] = False
+    # Map each V0144 value to the corresponding J0037x values and the K0XX flag to check
+    feeder_map = {
+        32768: ((True, False, False, False), 'K021', "feeder B putih"),
+        16384: ((True, True, False, False), 'K022', "feeder B Warna1"),
+        8192:  ((True, True, True, False), 'K023', "feeder B Warna2"),
+        4096:  ((True, True, True, True), 'K024', "feeder B Warna3"),
+    }
+    
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00372': True,
-            #         'J00374': False,
-            #         'J00376': False,
-            #         'J00378': False
-            #     }})
+    V0144 = globals().get('V0144')
+    print('V0144', V0144)
+    mapping = feeder_map.get(V0144)
 
-            rotaryUnitHopLineB()
+    if mapping:
+        j_values, k_flag, message = mapping
+        print('V0144 : ', V0144, message)
+        if not globals().get(k_flag, False):
+            globals()['J00372'], globals()['J00374'], globals()['J00376'], globals()['J00378'] = j_values
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00372': j_values[0],
+                    'J00374': j_values[1],
+                    'J00376': j_values[2],
+                    'J00378': j_values[3],
+                }}
+            )
+            AutoRotaryUnitHopLineB()
         else:
-            motorMaterMixOffLineB()  
-
-    elif globals()['V0144'] == 16384:
-        print("feeder B Warna1")
-        if not globals()['K022']:
-            globals()['J00372'] = True
-            globals()['J00374'] = True
-            globals()['J00376'] = False
-            globals()['J00378'] = False
-
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00372': True,
-            #         'J00374': True,
-            #         'J00376': False,
-            #         'J00378': False
-            #     }})
-            rotaryUnitHopLineB()
-        else:
-            motorMaterMixOffLineB() 
-
-    elif globals()['V0144'] == 8192:
-        print("feeder B Warna2")
-        if not globals()['K023']:
-            globals()['J00372'] = True
-            globals()['J00374'] = True
-            globals()['J00376'] = True
-            globals()['J00378'] = False
-
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00372': True,
-            #         'J00374': True,
-            #         'J00376': True,
-            #         'J00378': False
-            #     }})
-            rotaryUnitHopLineB()
-        else:
-            motorMaterMixOffLineB() 
-
-    elif globals()['V0144'] == 4096:
-        print("feeder B Warna3")
-        if not globals()['K024']:
-            globals()['J00372'] = True
-            globals()['J00374'] = True
-            globals()['J00376'] = True
-            globals()['J00378'] = True
-
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00372': True,
-            #         'J00374': True,
-            #         'J00376': True,
-            #         'J00378': True
-            #     }})
-            rotaryUnitHopLineB()
-        else:
-            motorMaterMixOffLineB() 
+            AutoFeederLineBState(False)
     else:
-        motorMaterMixOffLineB()
+        AutoFeederLineBState(False)
 
-def rotaryUnitHopLineB():
-    print(f"globals()['V0153'] = {globals()['V0153']}")
-    if globals()['V0153'] == "strtB0":
-        globals()['J00359'] = True
-        globals()['J00361'] = False
-        globals()['J00363'] = False
-        globals()['J00365'] = False
-        globals()['J00367'] = False
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00359': True,
-        #         'J00361': False,
-        #         'J00363': False,
-        #         'J00365': False,
-        #         'J00367': False
-        #     }})
-        
-        K011TrueI00144While()
+def AutoRotaryUnitHopLineB():
+    print('trigerup')
+    # Map each V0153 state to the corresponding J003xx values
+    state_map= {
+        "strtB0": (True, False, False, False, False),
+        "strtB1": (True, True, False, False, False),
+        "strtB2": (True, True, True, False, False),
+        "strtB3": (True, True, True, True, False),
+        "strtB4": (True, True, True, True, True),
+        }
 
-    elif globals()['V0153'] == "strtB1":
-        globals()['J00359'] = True
-        globals()['J00361'] = True
-        globals()['J00363'] = False
-        globals()['J00365'] = False
-        globals()['J00367'] = False
-
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00359': True,
-        #         'J00361': True,
-        #         'J00363': False,
-        #         'J00365': False,
-        #         'J00367': False
-        #     }})
-    
-        K011TrueI00144While()
-
-    elif globals()['V0153'] == "strtB2":
-        globals()['J00359'] = True
-        globals()['J00361'] = True
-        globals()['J00363'] = True
-        globals()['J00365'] = False
-        globals()['J00367'] = False
-
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00359': True,
-        #         'J00361': True,
-        #         'J00363': True,
-        #         'J00365': False,
-        #         'J00367': False
-        #     }})
-    
-        K011TrueI00144While()
-
-    elif globals()['V0153'] == "strtB3":
-        globals()['J00359'] = True
-        globals()['J00361'] = True
-        globals()['J00363'] = True
-        globals()['J00365'] = True
-        globals()['J00367'] = False
-
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00359': True,
-        #         'J00361': True,
-        #         'J00363': True,
-        #         'J00365': True,
-        #         'J00367': False
-        #     }})
-    
-        K011TrueI00144While()
-
-    elif globals()['V0153'] == "strtB4":
-        globals()['J00359'] = True
-        globals()['J00361'] = True
-        globals()['J00363'] = True
-        globals()['J00365'] = True
-        globals()['J00367'] = True
-
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00359': True,
-        #         'J00361': True,
-        #         'J00363': True,
-        #         'J00365': True,
-        #         'J00367': True
-        #     }})
-    
-        K011TrueI00144While()
-    
+    values = state_map.get( V0153 )
+    print('V0153 : ',V0153,values)
+    if values:
+        updates = {
+            'J00359': values[0],
+            'J00361': values[1],
+            'J00363': values[2],
+            'J00365': values[3],
+            'J00367': values[4],
+        }
+        collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00359': values[0],
+            'J00361': values[1],
+            'J00363': values[2],
+            'J00365': values[3],
+            'J00367': values[4],}
+        })
+        AutoFeederLineBState(True)
     else:
-        motorMaterMixOffLineC()
+        AutoFeederLineBRestState()
 
-def K011TrueI00144While():        
-    globals()['J00370'] = True
-    globals()['J00385'] = True
-    globals()['J00384'] = True
-    globals()['J00357'] = True
-    globals()['J00369'] = False
-    globals()['J00368'] = True
-    globals()['J00356'] = True
+def AutoFeederLineBState(active: bool):
+    # Define the keys and their values for active True and False
+    states_true = {
+        'J00370': True,
+        'J00385': True,
+        'J00384': True,
+        'J00357': True,
+        'J00369': False,
+        'J00368': True,
+        'J00356': True,
+    }
+    states_false = {
+        'J00356': False,
+        'J00368': False,
+        'J00369': False,
+        'J00357': False,
+        'J00367': False,
+        'J00365': False,
+        'J00363': False,
+        'J00361': False,
+        'J00359': False,
+        'J00384': False,
+        'J00385': False,
+        'J00370': False,
+        'J00378': False,
+        'J00376': False,
+        'J00374': False,
+        'J00372': False,
+    }
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00370': True,
-    #         'J00385': True,
-    #         'J00384': True,
-    #         'J00357': True,
-    #         'J00369': False,
-    #         'J00368': True,
-    #         'J00356': True
-    #     }})
+    if active:
+        print ("State Auto Feeder Line B Active")
+        # Set globals for True states
+        for key, value in states_true.items():
+            globals()[key] = value
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': states_true}
+        )
+    else:
+        print ("State Auto Feeder Line B Inactive")
+        # Set globals for False states
+        for key, value in states_false.items():
+            globals()[key] = value
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': states_false}
+        )
 
-def motorMaterMixOffLineB():
-    # globals()['J00354'] = False
-    # globals()['J00355'] = False
-    globals()['J00356'] = False
-    globals()['J00368'] = False
-    globals()['J00369'] = False
-    globals()['J00357'] = False
-    globals()['J00367'] = False
-    globals()['J00365'] = False
-    globals()['J00363'] = False
-    globals()['J00361'] = False
-    globals()['J00359'] = False
-    globals()['J00384'] = False
-    globals()['J00385'] = False
-    globals()['J00370'] = False
-    globals()['J00378'] = False
-    globals()['J00376'] = False
-    globals()['J00374'] = False
-    globals()['J00372'] = False
+def AutoFeederLineBRestState():
 
-    # collection.update_one(
-    # {'_id': ObjectId(objID)},
-    # {'$set': {
-    #     'J00356': False,
-    #     'J00368': False,
-    #     'J00369': False,
-    #     'J00357': False,
-    #     'J00367': False,
-    #     'J00365': False,
-    #     'J00363': False,
-    #     'J00361': False,
-    #     'J00359': False,
-    #     'J00384': False,
-    #     'J00385': False,
-    #     'J00370': False,
-    #     'J00378': False,
-    #     'J00376': False,
-    #     'J00374': False,
-    #     'J00372': False
-    #     }})
+    states_rest = {
+        'J00359': False,
+        'J00361': False,
+        'J00363': False,
+        'J00365': False,
+        'J00367': False,
+        'J00368': False,
+        'J00369': False,
+        'J00357': False,
+        'J00384': True,
+        'J00385': True,
+        'J00370': True,
+    }
+
+    print ("State Auto Feeder Line B start Hibernating")
+        # Set globals for False states
+    for key, value in states_rest.items():
+        globals()[key] = value
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': states_rest}
+        )
 
 def TimerK011(val):
     if val and bool(globals()['V0149']):
@@ -3749,23 +3562,21 @@ def TimerK011(val):
         # reset
         print("TimerK011 STOP - TimerK011")
         stop_timer("J00245")
-        globals()['J00245'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00245': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00245': False
+            }})
 
 def ResetTimerK011():
     if globals()['J00243']:
         print("TimerK011 STOP-ResetTimerK011")
         stop_timer("J00245")
-        globals()['J00245'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00245': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00245': False
+            }})
 
 def autoHopperLineB():
     print(f"innn - globals()['V0152'] {globals()['V0152']}")
@@ -3777,13 +3588,13 @@ def autoHopperLineB():
             globals()['J00388'] = False
             globals()['J00386'] = True
             globals()['J00383'] = True
-            # collection.update_one(
-            # {'_id': ObjectId(objID)},
-            # {'$set': {
-            #     'J00388': False,
-            #     'J00386': True,
-            #     'J00383': True
-            #     }})
+            collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00388': False,
+                'J00386': True,
+                'J00383': True
+                }})
             
             cekHopperWarna()
 
@@ -3793,13 +3604,13 @@ def autoHopperLineB():
             globals()['J00388'] = True
             globals()['J00386'] = True
             globals()['J00383'] = True
-            # collection.update_one(
-            # {'_id': ObjectId(objID)},
-            # {'$set': {
-            #     'J00388': True,
-            #     'J00386': True,
-            #     'J00383': True
-            #     }})
+            collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00388': True,
+                'J00386': True,
+                'J00383': True
+                }})
 
             cekHopperWarna()
 
@@ -3814,13 +3625,13 @@ def cekHopperWarna():
         # while not globals()['I00022']:
         globals()['J00382'] = False
         globals()['J00381'] = True
-        # collection.update_one(
-        # {'_id': ObjectId(objID)},
-        # {'$set': {
-        #     'J00382': False,
-        #     'J00381': True,
-        #     'J00379': False
-        #     }})
+        collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00382': False,
+            'J00381': True,
+            'J00379': False
+            }})
         print("exit while buka pintu tblethopdoorB1")
     else:
         print("masuk while buka pintu tblethopdoorB0")
@@ -3828,13 +3639,13 @@ def cekHopperWarna():
         globals()['J00380'] = False
         globals()['J00379'] = True
         globals()['J00381'] = False
-        # collection.update_one(
-        # {'_id': ObjectId(objID)},
-        # {'$set': {
-        #    'J00380': False,
-        #    'J00379': True,
-        #    'J00381': False
-        #      }})
+        collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+           'J00380': False,
+           'J00379': True,
+           'J00381': False
+             }})
         print("exit while buka pintu tblethopdoorB0")
 
 def hopperElseFalseLineB():
@@ -3846,17 +3657,17 @@ def hopperElseFalseLineB():
     globals()['J00386'] = False
     globals()['J00388'] = False
 
-    # collection.update_one(
-    # {'_id': ObjectId(objID)},
-    # {'$set': {
-    #     'J00379': False,
-    #     'J00380': False,
-    #     'J00381': False,
-    #     'J00382': False,
-    #     'J00383': False,
-    #     'J00386': False,
-    #     'J00388': False
-    #     }})
+    collection.update_one(
+    {'_id': ObjectId(objID)},
+    {'$set': {
+        'J00379': False,
+        'J00380': False,
+        'J00381': False,
+        'J00382': False,
+        'J00383': False,
+        'J00386': False,
+        'J00388': False
+        }})
 
     print("All Hooper Line B False")
 
@@ -3888,8 +3699,9 @@ def v0153staB4():
     in1 = bool(globals()['V0153'] == "stopB2" and globals()['J00138'] and not globals()['J00139'])
     in2 = bool(globals()['V0153'] == "stopB3" and not globals()['J00139'])
     in3 = bool(globals()['V0153'] == "stopB0" and globals()['J00136'] and globals()['J00137'] and globals()['J00138'] and not globals()['J00139'])
-
-    if in0 or in1 or in2 or in3:
+    in4 = bool(globals()['V0153'] == "stopB4" and globals()['J00136'] and globals()['J00136'] and globals()['J00137'] and globals()['J00138'] and not globals()['J00139'])
+    
+    if in0 or in1 or in2 or in3 or in4:
         globals()['V0153'] = "strtB4"
         collection.update_one(
             {'_id': ObjectId(objID)},
@@ -3911,7 +3723,7 @@ def v0153staB0():
     in1 = bool(globals()['V0153'] == "stopB2" and globals()['J00138'] and globals()['J00139'] and not globals()['J00135'])
     in2 = bool(globals()['V0153'] == "stopB3" and globals()['J00139'] and not globals()['J00135'])
     in3 = bool(globals()['V0153'] == "stopB1" and globals()['J00137'] and globals()['J00138'] and globals()['J00139'] and not globals()['J00135'])
-
+    
     if in0 or in1 or in2 or in3:
         globals()['V0153'] = "strtB0"
         collection.update_one(
@@ -3957,10 +3769,11 @@ def v0153staB2():
     in1 = bool(globals()['V0153'] == "stopB0" and globals()['J00136'] and not globals()['J00137'])
     in2 = bool(globals()['V0153'] == "stopB1" and not globals()['J00137'])
     in3 = bool(globals()['V0153'] == "stopB3" and globals()['J00139'] and globals()['J00135'] and globals()['J00136'] and not globals()['J00137'])
+    in4 = bool(globals()['V0153'] == "stopB2" and globals()['J00139'] and globals()['J00135'] and globals()['J00136'] and globals()['J00138'] and not globals()['J00137'])
 
     print(f"{in0} - {in1} - {in2} - {in3}")
 
-    if in0 or in1 or in2 or in3:
+    if in0 or in1 or in2 or in3 or in4:
         globals()['V0153'] = "strtB2"
         collection.update_one(
             {'_id': ObjectId(objID)},
@@ -4092,22 +3905,22 @@ def FillMixerBStart():
 
     print("------->FillMixerBStart")
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00243': globals()['J00243']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00243': globals()['J00243']
+        }})
     
     print(f"masuk While tutup pintu :  globals()['I00002'] { globals()['I00002']}")
     while not bool(globals()['I00002']):
         globals()['J00354'] = False
         globals()['J00355'] = True
-        # collection.update_one(
-        # {'_id': ObjectId(objID)},
-        # {'$set': {
-        #     'J00354': False,
-        #     'J00355': True
-        #     }})
+        collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00354': False,
+            'J00355': True
+            }})
     print(f"exit While tutup pintu")
     globals()['J00354'] = False
     globals()['J00355'] = False
@@ -4116,15 +3929,15 @@ def FillMixerBStart():
 
     globals()['J00243'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00354': False,
-    #         'J00355': False,
-    #         'J00353': False,
-    #         'J00352': True,
-    #         'J00243': False
-    #         }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00354': False,
+            'J00355': False,
+            'J00353': False,
+            'J00352': True,
+            'J00243': False
+            }})
 
 def DumpMixerBLogic():
     runDumpMixerC = frameDumpMixer(globals()['J00038'], globals()['J00245'], globals()['J00243'])
@@ -4140,25 +3953,25 @@ def DumpMixerBStart():
     globals()['J00352'] = False
     globals()['J00353'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00244': globals()['J00244'],
-    #         'J00352': globals()['J00352'],
-    #         'J00353': globals()['J00353']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00244': globals()['J00244'],
+            'J00352': globals()['J00352'],
+            'J00353': globals()['J00353']
+        }})
     
     print(f"masuk While BUKA pintu :  globals()['I00001'] { globals()['I00001']}")
     while not bool(globals()['I00001']):
         globals()['J00355'] = False
         globals()['J00354'] = True
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00355': globals()['J00355'],
-        #         'J00354': globals()['J00354']
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00355': globals()['J00355'],
+                'J00354': globals()['J00354']
+            }})
     
     print(f">> EXIT While BUKA pintu :  globals()['I00001'] { globals()['I00001']}")
 
@@ -4166,13 +3979,13 @@ def DumpMixerBStart():
     globals()['J00354'] = False
     globals()['J00244'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00355': globals()['J00355'],
-    #         'J00354': globals()['J00354'],
-    #         'J00244': globals()['J00244']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00355': globals()['J00355'],
+            'J00354': globals()['J00354'],
+            'J00244': globals()['J00244']
+        }})
 
 # END LOGIC CODE LINE B - MANUAL AUTO
 
@@ -4401,11 +4214,11 @@ def TimerK048(val):
         globals()['J00208'] = False
         stop_timer("J00208")
         globals()['K048'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00208': bool(globals()['J00208'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00208': bool(globals()['J00208'])
+            }})
 
 def PneumToRotaryCnvyrC1():
 
@@ -4430,21 +4243,21 @@ def TimerK049(val):
         globals()['J00209'] = False
         stop_timer("J00209")
         globals()['K049'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00209': bool(globals()['J00209'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00209': bool(globals()['J00209'])
+            }})
 
 def PneumToRotaryCnvyrC2():
 
     globals()['I00235'] = frame3and2or4and(globals()['I00096'], globals()['J00543'], globals()['V0146'], globals()['J00421'], globals()['J00069'])
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00235': bool(globals()['I00235'])
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00235': bool(globals()['I00235'])
+        }})
 
     setOutputToRLY()
 
@@ -4459,11 +4272,11 @@ def TimerK050(val):
         globals()['J00210'] = False
         stop_timer("J00210")
         globals()['K050'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00210': bool(globals()['J00210'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00210': bool(globals()['J00210'])
+            }})
 
 def MotorFrmRtaryCnvyrC0():
 
@@ -4532,11 +4345,11 @@ def TimerK051(val):
         globals()['J00203'] = False
         stop_timer("J00203")
         globals()['K051'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00203': bool(globals()['J00203'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00203': bool(globals()['J00203'])
+            }})
 
 def PneumToHopperCnvyrC1():
 
@@ -4561,11 +4374,11 @@ def TimerK052(val):
         globals()['J00204'] = False
         stop_timer("J00204")
         globals()['K052'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00204': bool(globals()['J00204'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00204': bool(globals()['J00204'])
+            }})
 
 def PneumToHopperCnvyrC2():
 
@@ -4590,11 +4403,11 @@ def TimerK053(val):
         globals()['J00205'] = False
         stop_timer("J00205")
         globals()['K053'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00205': bool(globals()['J00205'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00205': bool(globals()['J00205'])
+            }})
 
 def PneumToHopperCnvyrC3():
 
@@ -4620,11 +4433,11 @@ def TimerK054(val):
         globals()['J00206'] = False
         stop_timer("J00206")
         globals()['K054'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00206': bool(globals()['J00206'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00206': bool(globals()['J00206'])
+            }})
 
 def PneumToHopperCnvyrC4():
 
@@ -4649,11 +4462,11 @@ def TimerK055(val):
         globals()['J00207'] = False
         stop_timer("J00207")
         globals()['K055'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00207': bool(globals()['J00207'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00207': bool(globals()['J00207'])
+            }})
 
 def PneumTbletHoprDoorC0Open():
 
@@ -4706,11 +4519,11 @@ def TimerK056(val):
         globals()['J00198'] = False
         stop_timer("J00198")
         globals()['K056'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00198': bool(globals()['J00198'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00198': bool(globals()['J00198'])
+            }})
 
 def PneumTbletHoprDoorC1Open():
    
@@ -4764,11 +4577,11 @@ def TimerK057(val):
         globals()['J00199'] = False
         stop_timer("J00199")
         globals()['K057'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00199': bool(globals()['J00199'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00199': bool(globals()['J00199'])
+            }})
 
 def PneumTbletHoprDoorC2Open():
    
@@ -4821,11 +4634,11 @@ def TimerK058(val):
         globals()['J00200'] = False
         stop_timer("J00200")
         globals()['K058'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00200': bool(globals()['J00200'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00200': bool(globals()['J00200'])
+            }})
 
 def PneumTbletHoprDoorC3Open():
    
@@ -4892,11 +4705,11 @@ def TimerK059(val):
         globals()['J00201'] = False
         stop_timer("J00201")
         globals()['K059'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00201': bool(globals()['J00201'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00201': bool(globals()['J00201'])
+            }})
 
 def PneumTbletHoprDoorC4Open():
  
@@ -4951,11 +4764,11 @@ def TimerK060(val):
         globals()['J00202'] = False
         stop_timer("J00202")
         globals()['K060'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00202': bool(globals()['J00202'])
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00202': bool(globals()['J00202'])
+            }})
 
 def autoFeederLineC():
     # time.sleep(3)
@@ -4969,15 +4782,15 @@ def autoFeederLineC():
             globals()['J00445'] = False
             globals()['J00447'] = False
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00439': True,
-            #         'J00441': False,
-            #         'J00443': False,
-            #         'J00445': False,
-            #         'J00447': False
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00439': True,
+                    'J00441': False,
+                    'J00443': False,
+                    'J00445': False,
+                    'J00447': False
+                }})
 
             rotaryUnitHopLineC()
         else:
@@ -4994,15 +4807,15 @@ def autoFeederLineC():
             globals()['J00445'] = False
             globals()['J00447'] = False
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00439': True,
-            #         'J00441': True,
-            #         'J00443': False,
-            #         'J00445': False,
-            #         'J00447': False
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00439': True,
+                    'J00441': True,
+                    'J00443': False,
+                    'J00445': False,
+                    'J00447': False
+                }})
             
             rotaryUnitHopLineC()
 
@@ -5015,15 +4828,15 @@ def autoFeederLineC():
             globals()['J00445'] = False
             globals()['J00447'] = False
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00439': True,
-            #         'J00441': True,
-            #         'J00443': True,
-            #         'J00445': False,
-            #         'J00447': False
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00439': True,
+                    'J00441': True,
+                    'J00443': True,
+                    'J00445': False,
+                    'J00447': False
+                }})
             
             rotaryUnitHopLineC()
 
@@ -5037,15 +4850,15 @@ def autoFeederLineC():
             globals()['J00445'] = True
             globals()['J00447'] = False
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00439': True,
-            #         'J00441': True,
-            #         'J00443': True,
-            #         'J00445': True,
-            #         'J00447': False
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00439': True,
+                    'J00441': True,
+                    'J00443': True,
+                    'J00445': True,
+                    'J00447': False
+                }})
             
             rotaryUnitHopLineC()
     
@@ -5058,15 +4871,15 @@ def autoFeederLineC():
             globals()['J00445'] = True
             globals()['J00447'] = True
 
-            # collection.update_one(
-            #     {'_id': ObjectId(objID)},
-            #     {'$set': {
-            #         'J00439': True,
-            #         'J00441': True,
-            #         'J00443': True,
-            #         'J00445': True,
-            #         'J00447': True
-            #     }})
+            collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00439': True,
+                    'J00441': True,
+                    'J00443': True,
+                    'J00445': True,
+                    'J00447': True
+                }})
             
             rotaryUnitHopLineC()
     
@@ -5081,13 +4894,13 @@ def rotaryUnitHopLineC():
         globals()['J00419'] = False
         globals()['J00421'] = False
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00417': True,
-        #         'J00419': False,
-        #         'J00421': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00417': True,
+                'J00419': False,
+                'J00421': False
+            }})
         
         K043TrueI00066While()
     elif globals()['V0154'] == "strtC1":
@@ -5095,13 +4908,13 @@ def rotaryUnitHopLineC():
         globals()['J00419'] = True
         globals()['J00421'] = False
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00417': True,
-        #         'J00419': True,
-        #         'J00421': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00417': True,
+                'J00419': True,
+                'J00421': False
+            }})
     
         K043TrueI00066While()
     elif globals()['V0154'] == "strtC2":
@@ -5109,13 +4922,13 @@ def rotaryUnitHopLineC():
         globals()['J00419'] = True
         globals()['J00421'] = True
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00417': True,
-        #         'J00419': True,
-        #         'J00421': True
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00417': True,
+                'J00419': True,
+                'J00421': True
+            }})
         
         K043TrueI00066While()
     else:
@@ -5130,17 +4943,17 @@ def K043TrueI00066While():
     globals()['J00433'] = True
     globals()['J00432'] = True
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00437': True,
-    #         'J00436': True,
-    #         'J00435': True,
-    #         'J00415': True,
-    #         'J00434': False,
-    #         'J00433': True,
-    #         'J00432': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00437': True,
+            'J00436': True,
+            'J00435': True,
+            'J00415': True,
+            'J00434': False,
+            'J00433': True,
+            'J00432': True
+        }})
  
 def motorMaterMixOffLineC():
     # globals()['J00413'] = False
@@ -5161,28 +4974,28 @@ def motorMaterMixOffLineC():
     globals()['J00441'] = False
     globals()['J00439'] = False
 
-    # collection.update_one(
-    # {'_id': ObjectId(objID)},
-    # {'$set': {
-    #     'J00413': False,
-    #     'J00414': False,
-    #     'J00432': False,
-    #     'J00433': False,
-    #     'J00434': False,
-    #     'J00415': False,
-    #     'J00421': False,
-    #     'J00419': False,
-    #     'J00417': False,
-    #     'J00435': False,
-    #     'J00436': False,
-    #     'J00437': False,
-    #     'J00447': False,
-    #     'J00445': False,
-    #     'J00443': False,
-    #     'J00441': False,
-    #     'J00439': False
+    collection.update_one(
+    {'_id': ObjectId(objID)},
+    {'$set': {
+        'J00413': False,
+        'J00414': False,
+        'J00432': False,
+        'J00433': False,
+        'J00434': False,
+        'J00415': False,
+        'J00421': False,
+        'J00419': False,
+        'J00417': False,
+        'J00435': False,
+        'J00436': False,
+        'J00437': False,
+        'J00447': False,
+        'J00445': False,
+        'J00443': False,
+        'J00441': False,
+        'J00439': False
 
-    #     }})
+        }})
 
     # if bool(globals()['V0146']):
     #     print("ulang keatas")
@@ -5196,12 +5009,12 @@ def autoHopperLineC():
             while not globals()['I00070']:
                 globals()['J00423'] = False
                 globals()['J00422'] = True
-                # collection.update_one(
-                # {'_id': ObjectId(objID)},
-                # {'$set': {
-                #     'J00423': False,
-                #     'J00422': True
-                #     }})
+                collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00423': False,
+                    'J00422': True
+                    }})
             print("Exit while buka pintu tblethopdoor0")
         else:
             hopperElseFalseLineC()
@@ -5213,12 +5026,12 @@ def autoHopperLineC():
             while not globals()['I00072']:
                 globals()['J00425'] = False
                 globals()['J00424'] = True
-                # collection.update_one(
-                # {'_id': ObjectId(objID)},
-                # {'$set': {
-                #     'J00425': False,
-                #     'J00424': True
-                #     }})
+                collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00425': False,
+                    'J00424': True
+                    }})
             print("exit while buka pintu tblethopdoor1")
         else:
             hopperElseFalseLineC()
@@ -5230,12 +5043,12 @@ def autoHopperLineC():
             while not globals()['I00074']:
                 globals()['J00427'] = False
                 globals()['J00426'] = True
-                # collection.update_one(
-                # {'_id': ObjectId(objID)},
-                # {'$set': {
-                #     'J00427': False,
-                #     'J00426': True
-                #     }})
+                collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00427': False,
+                    'J00426': True
+                    }})
             print("exit while buka pintu tblethopdoor2")
         else:
             hopperElseFalseLineC()
@@ -5246,12 +5059,12 @@ def autoHopperLineC():
             while not globals()['I00076']:
                 globals()['J00429'] = False
                 globals()['J00428'] = True
-                # collection.update_one(
-                # {'_id': ObjectId(objID)},
-                # {'$set': {
-                #     'J00429': False,
-                #     'J00428': True
-                #     }})
+                collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00429': False,
+                    'J00428': True
+                    }})
             print("exit while buka pintu tblethopdoor3")
         else:
             hopperElseFalseLineC()
@@ -5263,12 +5076,12 @@ def autoHopperLineC():
             while not globals()['I00078']:
                 globals()['J00431'] = False
                 globals()['J00430'] = True
-                # collection.update_one(
-                # {'_id': ObjectId(objID)},
-                # {'$set': {
-                #     'J00431': False,
-                #     'J00430': True
-                #     }})
+                collection.update_one(
+                {'_id': ObjectId(objID)},
+                {'$set': {
+                    'J00431': False,
+                    'J00430': True
+                    }})
             print("masuk while buka pintu tblethopdoor4")
         else:
             hopperElseFalseLineC()
@@ -5287,20 +5100,20 @@ def hopperElseFalseLineC():
     globals()['J00422'] = False
     globals()['J00423'] = False
 
-    # collection.update_one(
-    # {'_id': ObjectId(objID)},
-    # {'$set': {
-    #     'J00430': False,
-    #     'J00431': False,
-    #     'J00428': False,
-    #     'J00429': False,
-    #     'J00426': False,
-    #     'J00427': False,
-    #     'J00424': False,
-    #     'J00425': False,
-    #     'J00422': False,
-    #     'J00423': False
-    #     }})
+    collection.update_one(
+    {'_id': ObjectId(objID)},
+    {'$set': {
+        'J00430': False,
+        'J00431': False,
+        'J00428': False,
+        'J00429': False,
+        'J00426': False,
+        'J00427': False,
+        'J00424': False,
+        'J00425': False,
+        'J00422': False,
+        'J00423': False
+        }})
 
     print("All Hooper False")
 
@@ -5313,24 +5126,22 @@ def TimerK043(val):
         # reset
         print("TimerK043 STOP - TimerK043")
         stop_timer("J00251")
-        globals()['J00251'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00251': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00251': False
+            }})
 
 def ResetTimerK043():
 # Stop Timer Mixing C
     if globals()['J00249']:
         print("TimerK043 STOP - ResetTimerK043")
         stop_timer("J00251")
-        globals()['J00251'] = False
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00251': False
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00251': False
+            }})
 
 def v0154staC0():
     in0 = bool(globals()['V0154'] == "stopC2" and not globals()['J00208'])
@@ -5444,22 +5255,22 @@ def FillerMixerCLogic():
 def FillMixerCStart():
     globals()['J00249'] = True
     print(f"------> FillMixerCStart")
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00249': globals()['J00249']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00249': globals()['J00249']
+        }})
     
     print(f"masuk While tutup pintu :  globals()['I00066'] { globals()['I00066']}")
     while not bool(globals()['I00066']):
         globals()['J00413'] = False
         globals()['J00414'] = True
-        # collection.update_one(
-        # {'_id': ObjectId(objID)},
-        # {'$set': {
-        #     'J00413': False,
-        #     'J00414': True
-        #     }})
+        collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00413': False,
+            'J00414': True
+            }})
     print(f"exit While tutup pintu")
     globals()['J00413'] = False
     globals()['J00414'] = False
@@ -5468,15 +5279,15 @@ def FillMixerCStart():
 
     globals()['J00249'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00413': False,
-    #         'J00414': False,
-    #         'J00412': False,
-    #         'J00411': True,
-    #         'J00249': False
-    #         }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00413': False,
+            'J00414': False,
+            'J00412': False,
+            'J00411': True,
+            'J00249': False
+            }})
 
 def DumpMixerCLogic():
     runDumpMixerC = frameDumpMixer(globals()['J00058'], globals()['J00251'], globals()['J00249'])
@@ -5490,25 +5301,25 @@ def DumpMixerCStart():
     globals()['J00411'] = False
     globals()['J00412'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00250': globals()['J00250'],
-    #         'J00411': globals()['J00411'],
-    #         'J00412': globals()['J00412']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00250': globals()['J00250'],
+            'J00411': globals()['J00411'],
+            'J00412': globals()['J00412']
+        }})
     
     print(f"masuk While BUKA pintu :  globals()['I00065'] { globals()['I00065']}")
     while not bool(globals()['I00065']):
         globals()['J00414'] = False
         globals()['J00413'] = True
 
-        # collection.update_one(
-        #     {'_id': ObjectId(objID)},
-        #     {'$set': {
-        #         'J00414': globals()['J00414'],
-        #         'J00413': globals()['J00413']
-        #     }})
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'J00414': globals()['J00414'],
+                'J00413': globals()['J00413']
+            }})
     
     print(f">> EXIT While BUKA pintu :  globals()['I00065'] { globals()['I00065']}")
 
@@ -5516,13 +5327,13 @@ def DumpMixerCStart():
     globals()['J00413'] = False
     globals()['J00250'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00414': globals()['J00414'],
-    #         'J00413': globals()['J00413'],
-    #         'J00250': globals()['J00250']
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00414': globals()['J00414'],
+            'J00413': globals()['J00413'],
+            'J00250': globals()['J00250']
+        }})
 
 # END LOGIC CODE LINE C - MANUAL AUTO
 
@@ -5543,21 +5354,21 @@ def isManytoFull():
     globals()['I00017'] = True
     globals()['I00018'] = True
     globals()['I00019'] = True
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00006': True,
-    #         'I00007': True,
-    #         'I00008': True,
-    #         'I00009': True,
-    #         'I00010': True,
-    #         'I00014': True,
-    #         'I00015': True,
-    #         'I00016': True,
-    #         'I00017': True,
-    #         'I00018': True,
-    #         'I00019': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00006': True,
+            'I00007': True,
+            'I00008': True,
+            'I00009': True,
+            'I00010': True,
+            'I00014': True,
+            'I00015': True,
+            'I00016': True,
+            'I00017': True,
+            'I00018': True,
+            'I00019': True
+        }})
 
 def oldisManytoFullReset():
     globals()['I00006'] = False
@@ -5571,31 +5382,31 @@ def oldisManytoFullReset():
     globals()['I00017'] = False
     globals()['I00018'] = False
     globals()['I00019'] = False
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00006': False,
-    #         'I00007': False,
-    #         'I00008': False,
-    #         'I00009': False,
-    #         'I00010': False,
-    #         'I00014': False,
-    #         'I00015': False,
-    #         'I00016': False,
-    #         'I00017': False,
-    #         'I00018': False,
-    #         'I00019': False
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00006': False,
+            'I00007': False,
+            'I00008': False,
+            'I00009': False,
+            'I00010': False,
+            'I00014': False,
+            'I00015': False,
+            'I00016': False,
+            'I00017': False,
+            'I00018': False,
+            'I00019': False
+        }})
     # print(f"{globals()['J00528']}")
     # print(f"{globals()['K032V0032IsJam']}")
 
 def isManytoFullReset():
     globals()['J00175'] = True
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00175': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00175': True
+        }})
     # print(f"{globals()['J00528']}")
     # print(f"{globals()['K032V0032IsJam']}")
 
@@ -5623,41 +5434,41 @@ def isJam():
     globals()['I00084'] = True
     globals()['I00085'] = True
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00064': True,
-    #         'I00067': True,
-    #         'I00068': True,
-    #         'I00069': True,
-    #         'I00083': True,
-    #         'I00084': True,
-    #         'I00085': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00064': True,
+            'I00067': True,
+            'I00068': True,
+            'I00069': True,
+            'I00083': True,
+            'I00084': True,
+            'I00085': True
+        }})
     
 def on1fault():
     globals()['J00139'] = True
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00139': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00139': True
+        }})
 
 def on2fault():
     globals()['I00081'] = True
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00081': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00081': True
+        }})
 
 def on3fault():
     globals()['I00082'] = True
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00082': True
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00082': True
+        }})
 
 def isJamReset():
     globals()['I00064'] = False
@@ -5668,17 +5479,17 @@ def isJamReset():
     globals()['I00084'] = False
     globals()['I00085'] = False
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'I00064': False,
-    #         'I00067': False,
-    #         'I00068': False,
-    #         'I00069': False,
-    #         'I00083': False,
-    #         'I00084': False,
-    #         'I00085': False
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'I00064': False,
+            'I00067': False,
+            'I00068': False,
+            'I00069': False,
+            'I00083': False,
+            'I00084': False,
+            'I00085': False
+        }})
 
 def oldresetAuto():
     globals()['V0146'] = 0
@@ -5729,57 +5540,57 @@ def oldresetAuto():
     globals()['J00443'] = False
     globals()['J00441'] = False
     globals()['J00439'] = False
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         # LINE B
-    #         'J00352' : False,
-    #         'J00353' : False,
-    #         'J00354' : False,
-    #         'J00355' : False,
-    #         'J00356' : False,
-    #         'J00368' : False,
-    #         'J00369' : False,
-    #         'J00357' : False,
-    #         'J00367' : False,
-    #         'J00365' : False,
-    #         'J00363' : False,
-    #         'J00361' : False,
-    #         'J00359' : False,
-    #         'J00384' : False,
-    #         'J00385' : False,
-    #         'J00370' : False,
-    #         'J00378' : False,
-    #         'J00376' : False,
-    #         'J00374' : False,
-    #         'J00372' : False,
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            # LINE B
+            'J00352' : False,
+            'J00353' : False,
+            'J00354' : False,
+            'J00355' : False,
+            'J00356' : False,
+            'J00368' : False,
+            'J00369' : False,
+            'J00357' : False,
+            'J00367' : False,
+            'J00365' : False,
+            'J00363' : False,
+            'J00361' : False,
+            'J00359' : False,
+            'J00384' : False,
+            'J00385' : False,
+            'J00370' : False,
+            'J00378' : False,
+            'J00376' : False,
+            'J00374' : False,
+            'J00372' : False,
 
-    #         # 'J00439': False,
-    #         # 'J00417': False,
-    #         # LINE C
-    #         'J00411': False,
-    #         'J00413': False,
-    #         'J00414': False,
-    #         'J00432': False,
-    #         'J00433': False,
-    #         'J00434': False,
-    #         'J00415': False,
-    #         'J00421': False,
-    #         'J00419': False,
-    #         'J00417': False,
-    #         'J00435': False,
-    #         'J00436': False,
-    #         'J00437': False,
-    #         'J00447': False,
-    #         'J00445': False,
-    #         'J00443': False,
-    #         'J00441': False,
-    #         'J00439': False,
-    #         'V0146': 0,
-    #         'V0147': 0,
-    #         'V0144': 0,
-    #         'V0145': 0
-    #     }})
+            # 'J00439': False,
+            # 'J00417': False,
+            # LINE C
+            'J00411': False,
+            'J00413': False,
+            'J00414': False,
+            'J00432': False,
+            'J00433': False,
+            'J00434': False,
+            'J00415': False,
+            'J00421': False,
+            'J00419': False,
+            'J00417': False,
+            'J00435': False,
+            'J00436': False,
+            'J00437': False,
+            'J00447': False,
+            'J00445': False,
+            'J00443': False,
+            'J00441': False,
+            'J00439': False,
+            'V0146': 0,
+            'V0147': 0,
+            'V0144': 0,
+            'V0145': 0
+        }})
     
 def resetAuto():
     # Filler C
@@ -5805,24 +5616,24 @@ def resetAuto():
     globals()['J00410'] = False
 
 
-    # collection.update_one(
-    #     {'_id': ObjectId(objID)},
-    #     {'$set': {
-    #         'J00249' : False,
-    #         'J00250' : False,
-    #         'J00413' : False,
-    #         'J00414' : False,
-    #         'J00412' : False,
-    #         'J00411' : False,
-    #         'J00243' : False,
-    #         'J00244' : False,
-    #         'J00354' : False,
-    #         'J00355' : False,
-    #         'J00353' : False,
-    #         'J00352' : False,
-    #         'J00389' : False,
-    #         'J00410' : False,
-    #     }})
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': {
+            'J00249' : False,
+            'J00250' : False,
+            'J00413' : False,
+            'J00414' : False,
+            'J00412' : False,
+            'J00411' : False,
+            'J00243' : False,
+            'J00244' : False,
+            'J00354' : False,
+            'J00355' : False,
+            'J00353' : False,
+            'J00352' : False,
+            'J00389' : False,
+            'J00410' : False,
+        }})
     
 def AllAlarmReset():
     collection.update_one(
@@ -5884,22 +5695,9 @@ queueManageThread = threading.Thread(target=queueManage)
 queueManageThread.daemon = True
 queueManageThread.start()
 
-def handle_sigterm(signum, frame):
-    print("\n🔚 Received termination signal")
-    collection.delete_one({"_id": doc_antrian.inserted_id})
-    sys.exit(0)
-    
-signal.signal(signal.SIGTERM, handle_sigterm)
-signal.signal(signal.SIGINT, handle_sigterm)
-
 try:
-    app.mainloop()  # Start your Tkinter application
-except KeyboardInterrupt:
-    print("\n🚨 Application terminated by user (Ctrl+C)")
-    collection.delete_one({"_id": doc_antrian.inserted_id})
-    sys.exit(1)
-except Exception as e:
-    print(f"\n🔥 Application crashed: {str(e)}")
+    app.mainloop()
+except:
     collection.delete_one({"_id": doc_antrian.inserted_id})
 
 # result = ydu.YduClose(input_id)
