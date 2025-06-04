@@ -1,4 +1,3 @@
-
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import os
@@ -204,7 +203,95 @@ db_mongo = client['unitamaDB']
 collection = db_mongo['napthalMachine']
 objID = '68366b8cde0dc02539587580'
 
+def unpack_inputs(packed_inputs: dict):
+    # Unpack 8 bits per byte to Ixxxxx keys
+    for j in range(16):
+        qi_key = f"qi{str(j).zfill(4)}glovar"
+        if qi_key not in packed_inputs.keys():
+            continue
+        qi_val = packed_inputs[qi_key]
+        if not isinstance(qi_val, int):
+            continue
+        for bit_position in range(8):
+            input_idx = j * 8 + bit_position
+            old_val = globals().get(f'I{input_idx:05d}')
+            bit_val = (qi_val >> bit_position) & 1
 
+            if old_val != bool(bit_val):
+                globals()[f'I{input_idx:05d}'] = bit_val == 1
+
+def unpack_processes(packed_processes: dict):
+    # Unpack 8 bits per byte to Jxxxxx keys
+    for j in range(16, 72):
+        qj_key = f"qj{str(j).zfill(4)}latchv"
+        if qj_key not in packed_processes.keys():
+            continue
+        qj_val = packed_processes[qj_key]
+        if not isinstance(qj_val, int):
+            continue
+        for bit_position in range(8):
+            process_idx = j * 8 + bit_position
+            old_val = globals().get(f'J{process_idx:05d}')
+            bit_val = (qj_val >> bit_position) & 1
+
+            if old_val != bool(bit_val):
+                globals()[f'J{process_idx:05d}'] = bit_val == 1
+
+def JQueue():
+    return (
+        [globals()[f"J{8 * group + offset:05d}"] for offset in range(8)]
+        for group in range(16)
+    )
+
+previous_jqueues = [jqueue[:] for jqueue in JQueue()]
+
+def processQueue():
+    updated_queue = []
+    updated_var_names = []
+
+    for jqueue_index, current_jqueue in enumerate(JQueue()):
+        prev_jqueue = previous_jqueues[jqueue_index]
+        for bit_index, (prev_val, curr_val) in enumerate(zip(prev_jqueue, current_jqueue)):
+            if prev_val != curr_val:
+                updated_queue.append((jqueue_index, bit_index))
+
+                global_index = 8 * jqueue_index + bit_index
+                var_name = f"J{global_index:05d}"
+                updated_var_names.append(var_name)
+
+                previous_jqueues[jqueue_index][bit_index] = curr_val
+
+    return updated_queue, updated_var_names
+
+def updateProcess(updated_queue: list):
+    if not updated_queue:
+        return
+
+    # Group changes by their queue index
+    changed_groups = set()
+    for group_idx, _ in updated_queue:
+        changed_groups.add(group_idx)
+
+    # Build dictionary of full byte values for changed groups
+    packed_list = {}
+    current_queues = list(JQueue())  # Get current state of all groups
+    
+    for group_idx in changed_groups:
+        # Calculate the full byte value (0-255) for this group
+        byte_value = 0
+        for bit_idx, bit_val in enumerate(current_queues[group_idx]):
+            if bit_val:
+                byte_value |= (1 << bit_idx)  # Set bit if True
+                
+        # Key format: "qj{GROUP_NUMBER:04d}latchv" (GROUP_NUMBER = group_idx)
+        qi_key = f"qj{group_idx:04d}latchv"
+        packed_list[qi_key] = byte_value
+
+    # Update database
+    collection.update_one(
+        {'_id': ObjectId(objID)},
+        {'$set': packed_list}
+    )
 # -------------------------------------------
 # START SET PAGES VARIABLES
 # -------------------------------------------
@@ -312,10 +399,10 @@ widget_variable_map = {}
 document = collection.find_one({"_id": ObjectId(objID)})
 if document:
     for i in range(578):
-        var_name = f'J{i:05}'
-        if var_name in document:
-            # Setel nilai variabel global dengan nilai dari MongoDB
-            globals()[var_name] = document[var_name]
+        # var_name = f'J{i:05}'
+        # if var_name in document:
+        #     # Setel nilai variabel global dengan nilai dari MongoDB
+        #     globals()[var_name] = document[var_name]
 
         var_nameV = f'V{i:04}'
         if var_nameV in document:
@@ -326,6 +413,15 @@ if document:
         if var_nameI in document:
             # Setel nilai variabel global dengan nilai dari MongoDB
             globals()[var_nameI] = document[var_nameI]
+
+    TARGET_QI_KEYS_0_TO_15 = {f"qi{str(j).zfill(4)}glovar" for j in range(16)}
+    TARGET_QJ_KEYS_0_TO_71 = {f"qj{str(j).zfill(4)}latchv" for j in range(72)}
+
+    if TARGET_QI_KEYS_0_TO_15 & document.keys():
+        unpack_inputs(document)
+
+    if TARGET_QJ_KEYS_0_TO_71 & document.keys():
+        unpack_processes(document)
 
 # time.sleep(1)
 
@@ -439,86 +535,162 @@ def resetButton():
     globals()['holdRedManCTbletHoprDoor4'] = False
     globals()['holdGreenManCTbletHoprDoor4'] = False
 
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            # LINE Z
-            'J00046': False,
-            'J00047': False,
-            'J00048': False,
-            'J00057': False,
-            'J00037': False,
-            'J00058': False,
-            'J00038': False,
-            # LINE B
-            'J00000': False,
-            'J00001': False,
-            'J00002': False,
-            'J00003': False,
-            'J00004': False,
-            'J00016': False,
-            'J00017': False,
-            'J00005': False,
-            'J00032': False,
-            'J00033': False,
-            'J00018': False,
-            'J00031': False,
-            'J00034': False,
-            'J00006': False,
-            'J00007': False,
-            'J00008': False,
-            'J00009': False,
-            'J00010': False,
-            'J00011': False,
-            'J00012': False,
-            'J00013': False,
-            'J00014': False,
-            'J00015': False,
-            'J00019': False,
-            'J00020': False,
-            'J00021': False,
-            'J00022': False,
-            'J00023': False,
-            'J00024': False,
-            'J00025': False,
-            'J00026': False,
-            'J00027': False,
-            'J00028': False,
-            'J00029': False,
-            'J00030': False,
-            'J00035': False,
-            'J00036': False,
-            # LINE C
-            'J00059': False,
-            'J00060': False,
-            'J00061': False,
-            'J00062': False,
-            'J00063': False,
-            'J00065': False,
-            'J00067': False,
-            'J00069': False,
-            'J00070': False,
-            'J00071': False,
-            'J00072': False,
-            'J00073': False,
-            'J00074': False,
-            'J00075': False,
-            'J00076': False,
-            'J00077': False,
-            'J00078': False,
-            'J00079': False,
-            'J00080': False,
-            'J00081': False,
-            'J00082': False,
-            'J00083': False,
-            'J00084': False,
-            'J00085': False,
-            'J00087': False,
-            'J00089': False,
-            'J00091': False,
-            'J00093': False,
-            'J00095': False
-        }})
+    globals()['J00046'] = False
+    globals()['J00047'] = False
+    globals()['J00048'] = False
+    globals()['J00057'] = False
+    globals()['J00037'] = False
+    globals()['J00058'] = False
+    globals()['J00038'] = False
+    # LINE B
+    globals()['J00000'] = False
+    globals()['J00001'] = False
+    globals()['J00002'] = False
+    globals()['J00003'] = False
+    globals()['J00004'] = False
+    globals()['J00016'] = False
+    globals()['J00017'] = False
+    globals()['J00005'] = False
+    globals()['J00032'] = False
+    globals()['J00033'] = False
+    globals()['J00018'] = False
+    globals()['J00031'] = False
+    globals()['J00034'] = False
+    globals()['J00006'] = False
+    globals()['J00007'] = False
+    globals()['J00008'] = False
+    globals()['J00009'] = False
+    globals()['J00010'] = False
+    globals()['J00011'] = False
+    globals()['J00012'] = False
+    globals()['J00013'] = False
+    globals()['J00014'] = False
+    globals()['J00015'] = False
+    globals()['J00019'] = False
+    globals()['J00020'] = False
+    globals()['J00021'] = False
+    globals()['J00022'] = False
+    globals()['J00023'] = False
+    globals()['J00024'] = False
+    globals()['J00025'] = False
+    globals()['J00026'] = False
+    globals()['J00027'] = False
+    globals()['J00028'] = False
+    globals()['J00029'] = False
+    globals()['J00030'] = False
+    globals()['J00035'] = False
+    globals()['J00036'] = False
+    # LINE C
+    globals()['J00059'] = False
+    globals()['J00060'] = False
+    globals()['J00061'] = False
+    globals()['J00062'] = False
+    globals()['J00063'] = False
+    globals()['J00065'] = False
+    globals()['J00067'] = False
+    globals()['J00069'] = False
+    globals()['J00070'] = False
+    globals()['J00071'] = False
+    globals()['J00072'] = False
+    globals()['J00073'] = False
+    globals()['J00074'] = False
+    globals()['J00075'] = False
+    globals()['J00076'] = False
+    globals()['J00077'] = False
+    globals()['J00078'] = False
+    globals()['J00079'] = False
+    globals()['J00080'] = False
+    globals()['J00081'] = False
+    globals()['J00082'] = False
+    globals()['J00083'] = False
+    globals()['J00084'] = False
+    globals()['J00085'] = False
+    globals()['J00087'] = False
+    globals()['J00089'] = False
+    globals()['J00091'] = False
+    globals()['J00093'] = False
+    globals()['J00095'] = False
+
+    # collection.update_one(
+    #     {'_id': ObjectId(objID)},
+    #     {'$set': {
+    #         # LINE Z
+    #         'J00046': False,
+    #         'J00047': False,
+    #         'J00048': False,
+    #         'J00057': False,
+    #         'J00037': False,
+    #         'J00058': False,
+    #         'J00038': False,
+    #         # LINE B
+    #         'J00000': False,
+    #         'J00001': False,
+    #         'J00002': False,
+    #         'J00003': False,
+    #         'J00004': False,
+    #         'J00016': False,
+    #         'J00017': False,
+    #         'J00005': False,
+    #         'J00032': False,
+    #         'J00033': False,
+    #         'J00018': False,
+    #         'J00031': False,
+    #         'J00034': False,
+    #         'J00006': False,
+    #         'J00007': False,
+    #         'J00008': False,
+    #         'J00009': False,
+    #         'J00010': False,
+    #         'J00011': False,
+    #         'J00012': False,
+    #         'J00013': False,
+    #         'J00014': False,
+    #         'J00015': False,
+    #         'J00019': False,
+    #         'J00020': False,
+    #         'J00021': False,
+    #         'J00022': False,
+    #         'J00023': False,
+    #         'J00024': False,
+    #         'J00025': False,
+    #         'J00026': False,
+    #         'J00027': False,
+    #         'J00028': False,
+    #         'J00029': False,
+    #         'J00030': False,
+    #         'J00035': False,
+    #         'J00036': False,
+    #         # LINE C
+    #         'J00059': False,
+    #         'J00060': False,
+    #         'J00061': False,
+    #         'J00062': False,
+    #         'J00063': False,
+    #         'J00065': False,
+    #         'J00067': False,
+    #         'J00069': False,
+    #         'J00070': False,
+    #         'J00071': False,
+    #         'J00072': False,
+    #         'J00073': False,
+    #         'J00074': False,
+    #         'J00075': False,
+    #         'J00076': False,
+    #         'J00077': False,
+    #         'J00078': False,
+    #         'J00079': False,
+    #         'J00080': False,
+    #         'J00081': False,
+    #         'J00082': False,
+    #         'J00083': False,
+    #         'J00084': False,
+    #         'J00085': False,
+    #         'J00087': False,
+    #         'J00089': False,
+    #         'J00091': False,
+    #         'J00093': False,
+    #         'J00095': False
+    #     }})
 # ================================================================================
 # END TOUCH SCREEN FUNCTION
 # ================================================================================
@@ -904,65 +1076,37 @@ def showAutoSetC():
     frame_tabManualCommon2.pack_forget()
     frame_SetAutoC.pack(fill="both", expand=True)
 
-def unpack_inputs(packed_inputs: dict):
-    # Unpack 8 bits per byte to Ixxxxx keys
-    for j in range(16):
-        qi_key = f"qi{str(j).zfill(4)}glovar"
-        if qi_key not in packed_inputs.keys():
-            continue
-        qi_val = packed_inputs[qi_key]
-        if not isinstance(qi_val, int):
-            continue
-        for bit_position in range(8):
-            input_idx = j * 8 + bit_position
-            old_val = globals().get(f'I{input_idx:05d}')
-            bit_val = (qi_val >> bit_position) & 1
-
-            if old_val != bool(bit_val):
-                globals()[f'I{input_idx:05d}'] = bit_val == 1
-
-def unpack_processes(packed_processes: dict):
-    # Unpack 8 bits per byte to Jxxxxx keys
-    for j in range(72):
-        qj_key = f"qj{str(j).zfill(4)}latchv"
-        if qj_key not in packed_processes.keys():
-            continue
-        qj_val = packed_processes[qj_key]
-        if not isinstance(qj_val, int):
-            continue
-        for bit_position in range(8):
-            process_idx = j * 8 + bit_position
-            old_val = globals().get(f'J{process_idx:05d}')
-            bit_val = (qj_val >> bit_position) & 1
-
-            if old_val != bool(bit_val):
-                globals()[f'J{process_idx:05d}'] = bit_val == 1
-
 def listenMongo():
     pipeline = [{'$match': {'documentKey._id': ObjectId(objID)}}]
+    updated_queue = []
     with collection.watch(pipeline) as stream:
         print("Listening for changes...")
 
         for change in stream:
-            updated_fields = change['updateDescription']['updatedFields']
-            print(f"updated_fields = {updated_fields}")
 
-            TARGET_QI_KEYS_0_TO_15 = {f"qi{str(j).zfill(4)}glovar" for j in range(16)}
+            if change['operationType'] == 'update':
+                try:
+                    updated_fields = change['updateDescription']['updatedFields']
+                    print(f"updated_fields = {updated_fields}")
 
-            # TARGET_QJ_KEYS_0_TO_71 = {f"qj{str(j).zfill(4)}latchv" for j in range(72)}
+                    TARGET_QI_KEYS_0_TO_15 = {f"qi{str(j).zfill(4)}glovar" for j in range(16)}
 
-            for key, value in updated_fields.items():
-                if key not in TARGET_QI_KEYS_0_TO_15:
-                  if key in globals():
-                      globals()[key] = value
-                  else:
-                      print(f"Warning: {key} not found in globals.")
+                    TARGET_QJ_KEYS_0_TO_71 = {f"qj{str(j).zfill(4)}latchv" for j in range(72)}
 
-            if TARGET_QI_KEYS_0_TO_15 & updated_fields.keys():
-                unpack_inputs(updated_fields)
+                    for key, value in updated_fields.items():
+                        if key not in TARGET_QI_KEYS_0_TO_15 and key not in TARGET_QJ_KEYS_0_TO_71:
+                            if key in globals():
+                                globals()[key] = value
+                            else:
+                                print(f"Warning: {key} not found in globals.")
 
-            # if TARGET_QJ_KEYS_0_TO_71 & updated_fields.keys():
-            #     unpack_processes(updated_fields)
+                    if TARGET_QI_KEYS_0_TO_15 & updated_fields.keys():
+                        unpack_inputs(updated_fields)
+
+                    if TARGET_QJ_KEYS_0_TO_71 & updated_fields.keys():
+                        unpack_processes(updated_fields)
+                except KeyError as e:
+                    print(f"Error accessing updated fields: {e}")
 
 def refreshGUI():
     global MaterMixDoorBlinking, GreenMaterMixDoor, RedMaterMixDoor, TbletHoprDoor0Blinking, GreenTbletHoprDoor0, RedTbletHoprDoor0, TbletHoprDoor1Blinking, GreenTbletHoprDoor1, RedTbletHoprDoor1
@@ -977,9 +1121,12 @@ def refreshGUI():
     global J00128, J00129, J00130, J00131, J00132, J00133, J00135, J00136, J00137, J00138, J00139, J00140, J00141, J00142, J00143, J00144, J00145, J00260, J00263, J00265, J00265, J00267, J00272, J00273
     global J00274, J00276, J00278, J00280, J00282, J00287, J00288, J00289, J00290, J00292, J00357, J00369, J00512, J00513, J00514, J00515, J00517, J00518, J00519, J00520, J00521, J00522, J00523
 
-    print('start refresh')
+    # print('start refresh')
     lightOrange_rgb = (247, 223, 192)  # RGB untuk oranye
     lightOrange = rgb_to_hex(lightOrange_rgb)
+
+    updated_queue, _ = processQueue()
+    updateProcess(updated_queue)
 
 # LINE COMMON
     # DumpMixerB
@@ -1197,11 +1344,12 @@ def refreshGUI():
 # LINE B
     # BUTTON FEEDER B
     # Putih
-    if globals()['V0148'] != 32768 and globals()['V0144'] != 32768:
+    if ((globals()['V0148'] & 32768) != 32768) and globals()['V0144'] != 32768:
         btnAutoFeedPutih.configure(fg_color="light green", text_color="white", state="normal")
-    elif globals()['V0148'] == 32768 and globals()['V0140'] != 32768 and globals()['V0144'] != 32768:
+    elif ((globals()['V0148'] & 32768) == 32768) and globals()['V0140'] != 32768 and globals()['V0144'] != 32768:
         btnAutoFeedPutih.configure(fg_color="lime", text_color="black", state="normal")
-    elif globals()['V0148'] == 32768 and globals()['V0140'] == 32768 and globals()['V0144'] != 32768:
+    elif ((globals()['V0148'] & 32768) == 32768) and globals()['V0140'] == 32768 and globals()['V0144'] != 32768:
+        # print("BUTTON FEEDER B", globals()['V0148'], globals()['V0140'], globals()['V0144'])
         if globals()['FeederBPutihBlinking']:
             btnAutoFeedPutih.configure(fg_color="light green", text_color="white", state="normal")
         else:
@@ -1211,11 +1359,11 @@ def refreshGUI():
         btnAutoFeedPutih.configure(fg_color="lime", text_color="black", state="normal")
     
     # Warna1
-    if globals()['V0148'] != 16384 and globals()['V0144'] != 16384:
+    if ((globals()['V0148'] & 16384) != 16384) and globals()['V0144'] != 16384:
         btnAutoFeedWarna1.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 16384 and globals()['V0140'] != 16384 and globals()['V0144'] != 16384:
+    elif ((globals()['V0148'] & 16384) == 16384) and globals()['V0140'] != 16384 and globals()['V0144'] != 16384:
         btnAutoFeedWarna1.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 16384 and globals()['V0140'] == 16384 and globals()['V0144'] != 16384:
+    elif ((globals()['V0148'] & 16384) == 16384) and globals()['V0140'] == 16384 and globals()['V0144'] != 16384:
         if globals()['FeederBWarna1Blinking']:
             btnAutoFeedWarna1.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -1225,11 +1373,11 @@ def refreshGUI():
         btnAutoFeedWarna1.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna2
-    if globals()['V0148'] != 8192 and globals()['V0144'] != 8192:
+    if ((globals()['V0148'] & 8192) != 8192) and globals()['V0144'] != 8192:
         btnAutoFeedWarna2.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 8192 and globals()['V0140'] != 8192 and globals()['V0144'] != 8192:
+    elif ((globals()['V0148'] & 8192) == 8192) and globals()['V0140'] != 8192 and globals()['V0144'] != 8192:
         btnAutoFeedWarna2.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 8192 and globals()['V0140'] == 8192 and globals()['V0144'] != 8192:
+    elif ((globals()['V0148'] & 8192) == 8192) and globals()['V0140'] == 8192 and globals()['V0144'] != 8192:
         if globals()['FeederBWarna2Blinking']:
             btnAutoFeedWarna2.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -1239,11 +1387,11 @@ def refreshGUI():
         btnAutoFeedWarna2.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna3
-    if globals()['V0148'] != 4096 and globals()['V0144'] != 4096:
+    if ((globals()['V0148'] & 4096) != 4096) and globals()['V0144'] != 4096:
         btnAutoFeedWarna3.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 4096 and globals()['V0140'] != 4096 and globals()['V0144'] != 4096:
+    elif ((globals()['V0148'] & 4096) == 4096) and globals()['V0140'] != 4096 and globals()['V0144'] != 4096:
         btnAutoFeedWarna3.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 4096 and globals()['V0140'] == 4096 and globals()['V0144'] != 4096:
+    elif ((globals()['V0148'] & 4096) == 4096) and globals()['V0140'] == 4096 and globals()['V0144'] != 4096:
         if globals()['FeederBWarna3Blinking']:
             btnAutoFeedWarna3.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -1253,12 +1401,12 @@ def refreshGUI():
         btnAutoFeedWarna3.configure(fg_color="red", text_color="black", state="normal")
     
     # Hopper Putih
-    if globals()['V0148'] != 2048 and globals()['V0145'] != 2048:
+    if ((globals()['V0148'] & 2048) != 2048) and globals()['V0145'] != 2048:
         btnAutoHopperPutih.configure(fg_color="light green", text_color="white", state="normal")
-    elif globals()['V0148'] == 2048 and globals()['V0141'] != 2048 and globals()['V0145'] != 2048:
+    elif ((globals()['V0148'] & 2048) == 2048) and globals()['V0141'] != 2048 and globals()['V0145'] != 2048:
         btnAutoHopperPutih.configure(fg_color="lime", text_color="black", state="normal")
-    elif globals()['V0148'] == 2048 and globals()['V0141'] == 2048 and globals()['V0145'] != 2048:
-        print(globals()['V0148'], globals()['V0141'], globals()['V0145'])
+    elif ((globals()['V0148'] & 2048) == 2048) and globals()['V0141'] == 2048 and globals()['V0145'] != 2048:
+        # print("Hopper Putih", globals()['V0148'], globals()['V0141'], globals()['V0145'])
         if globals()['HopperBPutihBlinking']:
             btnAutoHopperPutih.configure(fg_color="light green", text_color="white", state="normal")
         else:
@@ -1268,11 +1416,11 @@ def refreshGUI():
         btnAutoHopperPutih.configure(fg_color="lime", text_color="black", state="normal")
     
     # Hopper Warna
-    if globals()['V0148'] != 1024 and globals()['V0145'] != 1024:
+    if ((globals()['V0148'] & 1024) != 1024) and globals()['V0145'] != 1024:
         btnAutoHopperWarna1.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 1024 and globals()['V0141'] != 1024 and globals()['V0145'] != 1024:
+    elif ((globals()['V0148'] & 1024) == 1024) and globals()['V0141'] != 1024 and globals()['V0145'] != 1024:
         btnAutoHopperWarna1.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 1024 and globals()['V0141'] == 1024 and globals()['V0145'] != 1024:
+    elif ((globals()['V0148'] & 1024) == 1024) and globals()['V0141'] == 1024 and globals()['V0145'] != 1024:
         if globals()['HopperBWarnaBlinking']:
             btnAutoHopperWarna1.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -1280,6 +1428,71 @@ def refreshGUI():
         globals()['HopperBWarnaBlinking'] = not globals()['HopperBWarnaBlinking']
     elif globals()['V0145'] == 1024:
         btnAutoHopperWarna1.configure(fg_color="red", text_color="black", state="normal")
+
+    mode = MaterialModeSelectorFeederB()
+
+    if mode.putih():
+        globals()['V0144'] = 32768
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0144': globals()['V0144']
+            }})
+    elif mode.warna1():
+        globals()['V0144'] = 16384
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0144': globals()['V0144']
+            }})
+    elif mode.warna2():
+        globals()['V0144'] = 8192
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0144': globals()['V0144']
+            }})
+    elif mode.warna3():
+        globals()['V0144'] = 4096
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0144': globals()['V0144']
+            }})
+    elif mode.reset():
+        globals()['V0144'] = 0
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0144': globals()['V0144']
+            }})
+
+
+    mode = ProductModeSelectorHopperB()
+
+    if mode.putih():
+        globals()['V0145'] = 2048
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0145': globals()['V0145']
+            }})
+
+    elif mode.warna():
+        globals()['V0145'] = 1024
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0145': globals()['V0145']
+            }})
+    elif mode.reset():
+        globals()['V0145'] = 0
+        collection.update_one(
+            {'_id': ObjectId(objID)},
+            {'$set': {
+                'V0145': globals()['V0145']
+            }})
+
 
     # ERROR
     if not globals()['J00544'] and globals()['J00512']:
@@ -2259,11 +2472,11 @@ def refreshGUI():
 # LINE C
     # BUTTON FEEDER C
     # Putih
-    if globals()['V0148'] != 512 and globals()['V0146'] != 512:
+    if ((globals()['V0148'] & 512) != 512) and globals()['V0146'] != 512:
         btnAutoFeedPutihC.configure(fg_color="light green", text_color="white", state="normal")
-    elif globals()['V0148'] == 512 and globals()['V0142'] != 512 and globals()['V0146'] != 512:
+    elif ((globals()['V0148'] & 512) == 512) and globals()['V0142'] != 512 and globals()['V0146'] != 512:
         btnAutoFeedPutihC.configure(fg_color="lime", text_color="black", state="normal")
-    elif globals()['V0148'] == 512 and globals()['V0142'] == 512 and globals()['V0146'] != 512:
+    elif ((globals()['V0148'] & 512) == 512) and globals()['V0142'] == 512 and globals()['V0146'] != 512:
         if globals()['FeederCPutihBlinking']:
             btnAutoFeedPutihC.configure(fg_color="light green", text_color="white", state="normal")
         else:
@@ -2273,11 +2486,11 @@ def refreshGUI():
         btnAutoFeedPutihC.configure(fg_color="lime", text_color="black", state="normal")
     
     # Warna1
-    if globals()['V0148'] != 256 and globals()['V0146'] != 256:
+    if ((globals()['V0148'] & 256) != 256) and globals()['V0146'] != 256:
         btnAutoFeedWarna1C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 256 and globals()['V0142'] != 256 and globals()['V0146'] != 256:
+    elif ((globals()['V0148'] & 256) == 256) and globals()['V0142'] != 256 and globals()['V0146'] != 256:
         btnAutoFeedWarna1C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 256 and globals()['V0142'] == 256 and globals()['V0146'] != 256:
+    elif ((globals()['V0148'] & 256) == 256) and globals()['V0142'] == 256 and globals()['V0146'] != 256:
         if globals()['FeederCWarna1Blinking']:
             btnAutoFeedWarna1C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2287,11 +2500,11 @@ def refreshGUI():
         btnAutoFeedWarna1C.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna2
-    if globals()['V0148'] != 128 and globals()['V0146'] != 128:
+    if ((globals()['V0148'] & 128) != 128) and globals()['V0146'] != 128:
         btnAutoFeedWarna2C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 128 and globals()['V0142'] != 128 and globals()['V0146'] != 128:
+    elif ((globals()['V0148'] & 128) == 128) and globals()['V0142'] != 128 and globals()['V0146'] != 128:
         btnAutoFeedWarna2C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 128 and globals()['V0142'] == 128 and globals()['V0146'] != 128:
+    elif ((globals()['V0148'] & 128) == 128) and globals()['V0142'] == 128 and globals()['V0146'] != 128:
         if globals()['FeederCWarna2Blinking']:
             btnAutoFeedWarna2C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2301,11 +2514,11 @@ def refreshGUI():
         btnAutoFeedWarna2C.configure(fg_color="red", text_color="black", state="normal")
 
     # Warna3
-    if globals()['V0148'] != 64 and globals()['V0146'] != 64:
+    if ((globals()['V0148'] & 64) != 64) and globals()['V0146'] != 64:
         btnAutoFeedWarna3C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 64 and globals()['V0142'] != 64 and globals()['V0146'] != 64:
+    elif ((globals()['V0148'] & 64) == 64) and globals()['V0142'] != 64 and globals()['V0146'] != 64:
         btnAutoFeedWarna3C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 64 and globals()['V0142'] == 64 and globals()['V0146'] != 64:
+    elif ((globals()['V0148'] & 64) == 64) and globals()['V0142'] == 64 and globals()['V0146'] != 64:
         if globals()['FeederCWarna3Blinking']:
             btnAutoFeedWarna3C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2315,11 +2528,11 @@ def refreshGUI():
         btnAutoFeedWarna3C.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna4
-    if globals()['V0148'] != 32 and globals()['V0146'] != 32:
+    if ((globals()['V0148'] & 32) != 32) and globals()['V0146'] != 32:
         btnAutoFeedWarna4C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 32 and globals()['V0142'] != 32 and globals()['V0146'] != 32:
+    elif ((globals()['V0148'] & 32) == 32) and globals()['V0142'] != 32 and globals()['V0146'] != 32:
         btnAutoFeedWarna4C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 32 and globals()['V0142'] == 32 and globals()['V0146'] != 32:
+    elif ((globals()['V0148'] & 32) == 32) and globals()['V0142'] == 32 and globals()['V0146'] != 32:
         if globals()['FeederCWarna4Blinking']:
             btnAutoFeedWarna4C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2330,11 +2543,11 @@ def refreshGUI():
     
     # BUTTON HOPPER C
     # Putih
-    if globals()['V0148'] != 16 and globals()['V0147'] != 16:
+    if ((globals()['V0148'] & 16) != 16) and globals()['V0147'] != 16:
         btnAutoHopperPutihC.configure(fg_color="light green", text_color="white", state="normal")
-    elif globals()['V0148'] == 16 and globals()['V0143'] != 16 and globals()['V0147'] != 16:
+    elif ((globals()['V0148'] & 16) == 16) and globals()['V0143'] != 16 and globals()['V0147'] != 16:
         btnAutoHopperPutihC.configure(fg_color="lime", text_color="black", state="normal")
-    elif globals()['V0148'] == 16 and globals()['V0143'] == 16 and globals()['V0147'] != 16:
+    elif ((globals()['V0148'] & 16) == 16) and globals()['V0143'] == 16 and globals()['V0147'] != 16:
         if globals()['HopperCPutihBlinking']:
             btnAutoHopperPutihC.configure(fg_color="light green", text_color="white", state="normal")
         else:
@@ -2344,11 +2557,11 @@ def refreshGUI():
         btnAutoHopperPutihC.configure(fg_color="lime", text_color="black", state="normal")
     
     # Warna1
-    if globals()['V0148'] != 8 and globals()['V0147'] != 8:
+    if ((globals()['V0148'] & 8) != 8) and globals()['V0147'] != 8:
         btnAutoHopperWarna1C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 8 and globals()['V0143'] != 8 and globals()['V0147'] != 8:
+    elif ((globals()['V0148'] & 8) == 8) and globals()['V0143'] != 8 and globals()['V0147'] != 8:
         btnAutoHopperWarna1C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 8 and globals()['V0143'] == 8 and globals()['V0147'] != 8:
+    elif ((globals()['V0148'] & 8) == 8) and globals()['V0143'] == 8 and globals()['V0147'] != 8:
         if globals()['HopperCWarna1Blinking']:
             btnAutoHopperWarna1C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2358,11 +2571,11 @@ def refreshGUI():
         btnAutoHopperWarna1C.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna2
-    if globals()['V0148'] != 4 and globals()['V0147'] != 4:
+    if ((globals()['V0148'] & 4) != 4) and globals()['V0147'] != 4:
         btnAutoHopperWarna2C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 4 and globals()['V0143'] != 4 and globals()['V0147'] != 4:
+    elif ((globals()['V0148'] & 4) == 4) and globals()['V0143'] != 4 and globals()['V0147'] != 4:
         btnAutoHopperWarna2C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 4 and globals()['V0143'] == 4 and globals()['V0147'] != 4:
+    elif ((globals()['V0148'] & 4) == 4) and globals()['V0143'] == 4 and globals()['V0147'] != 4:
         if globals()['HopperCWarna2Blinking']:
             btnAutoHopperWarna2C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2372,11 +2585,11 @@ def refreshGUI():
         btnAutoHopperWarna2C.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna3
-    if globals()['V0148'] != 2 and globals()['V0147'] != 2:
+    if ((globals()['V0148'] & 2) != 2) and globals()['V0147'] != 2:
         btnAutoHopperWarna3C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 2 and globals()['V0143'] != 2 and globals()['V0147'] != 2:
+    elif ((globals()['V0148'] & 2) == 2) and globals()['V0143'] != 2 and globals()['V0147'] != 2:
         btnAutoHopperWarna3C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 2 and globals()['V0143'] == 2 and globals()['V0147'] != 2:
+    elif ((globals()['V0148'] & 2) == 2) and globals()['V0143'] == 2 and globals()['V0147'] != 2:
         if globals()['HopperCWarna3Blinking']:
             btnAutoHopperWarna3C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -2386,11 +2599,11 @@ def refreshGUI():
         btnAutoHopperWarna3C.configure(fg_color="red", text_color="black", state="normal")
     
     # Warna4
-    if globals()['V0148'] != 1 and globals()['V0147'] != 1:
+    if ((globals()['V0148'] & 1) != 1) and globals()['V0147'] != 1:
         btnAutoHopperWarna4C.configure(fg_color="pink", text_color="white", state="normal")
-    elif globals()['V0148'] == 1 and globals()['V0143'] != 1 and globals()['V0147'] != 1:
+    elif ((globals()['V0148'] & 1) == 1) and globals()['V0143'] != 1 and globals()['V0147'] != 1:
         btnAutoHopperWarna4C.configure(fg_color="red", text_color="black", state="normal")
-    elif globals()['V0148'] == 1 and globals()['V0143'] == 1 and globals()['V0147'] != 1:
+    elif ((globals()['V0148'] & 1) == 1) and globals()['V0143'] == 1 and globals()['V0147'] != 1:
         if globals()['HopperCWarna4Blinking']:
             btnAutoHopperWarna4C.configure(fg_color="pink", text_color="white", state="normal")
         else:
@@ -3412,9 +3625,7 @@ def refreshGUI():
     #             'J00095': False
     #         }})
 
-    print('End refresh')
-
-
+    # print('End refresh')
 
     app.after(200, refreshGUI)
 
@@ -3825,7 +4036,7 @@ def cmdBtnZLineA():
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'J00048' : globals()['J00048'],
+            # 'J00048' : globals()['J00048'],
             'V0149': 16777216
         }})
     # btnZManLineA.configure(fg_color="lime", text_color="black")
@@ -3838,7 +4049,7 @@ def cmdBtnZLineB():
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'J00047' : globals()['J00047'],
+            # 'J00047' : globals()['J00047'],
             'V0149': 8388608
         }})
     # btnZManLineB.configure(fg_color="lime", text_color="black")
@@ -3851,7 +4062,7 @@ def cmdBtnZLineC():
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'J00046' : globals()['J00046'],
+            # 'J00046' : globals()['J00046'],
             'V0149': 4194304
         }})
     # btnZManLineC.configure(fg_color="lime", text_color="black")
@@ -3860,33 +4071,37 @@ def cmdBtnZLineC():
     # showCommonAuto()
 
 def cmdBtnFillC():
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'J00057': True
-        }})
+    globals()['J00057'] = True
+    # collection.update_one(
+    #     {'_id': ObjectId(objID)},
+    #     {'$set': {
+    #         'J00057': True
+    #     }})
 
 def cmdBtnDumpC():
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'J00058': True
-        }})
+    globals()['J00058'] = True
+    # collection.update_one(
+    #     {'_id': ObjectId(objID)},
+    #     {'$set': {
+    #         'J00058': True
+    #     }})
 
 
 def cmdBtnFillB():
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'J00037': True
-        }})
+    globals()['J00037'] = True
+    # collection.update_one(
+    #     {'_id': ObjectId(objID)},
+    #     {'$set': {
+    #         'J00037': True
+    #     }})
 
 def cmdBtnDumpB():
-    collection.update_one(
-        {'_id': ObjectId(objID)},
-        {'$set': {
-            'J00038': True
-        }})
+    globals()['J00038'] = True
+    # collection.update_one(
+    #     {'_id': ObjectId(objID)},
+    #     {'$set': {
+    #         'J00038': True
+    #     }})
 
 
 
@@ -3906,11 +4121,12 @@ def checkbtnRedZManFeedThreeDoorhold():
     if btnRedZManFeedThreeDoor.winfo_containing(btnRedZManFeedThreeDoor.winfo_pointerx(),
                                                btnRedZManFeedThreeDoor.winfo_pointery()):
         holdbtnRedZManFeedThreeDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00047': True
-            }})
+        globals()['J00047'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00047': True
+        #     }})
 
 def btnRedZManFeedThreeDoorClickReset():
     global holdbtnRedZManFeedThreeDoor, loopAllButtonFalse
@@ -3935,11 +4151,12 @@ def checkbtnYellowZManFeedThreeDoorhold():
     if btnYellowZManFeedThreeDoor.winfo_containing(btnYellowZManFeedThreeDoor.winfo_pointerx(),
                                                btnYellowZManFeedThreeDoor.winfo_pointery()):
         holdbtnYellowZManFeedThreeDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00048': True
-            }})
+        globals()['J00048'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00048': True
+        #     }})
 
 def btnYellowZManFeedThreeDoorClickReset():
     global holdbtnYellowZManFeedThreeDoor, loopAllButtonFalse
@@ -3962,11 +4179,12 @@ def checkbtnGreenZManFeedThreeDoorhold():
     if btnGreenZManFeedThreeDoor.winfo_containing(btnGreenZManFeedThreeDoor.winfo_pointerx(),
                                                btnGreenZManFeedThreeDoor.winfo_pointery()):
         holdbtnGreenZManFeedThreeDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00046': True
-            }})
+        globals()['J00046'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00046': True
+        #     }})
 
 def btnGreenZManFeedThreeDoorClickReset():
     global holdbtnGreenZManFeedThreeDoor, loopAllButtonFalse
@@ -3980,11 +4198,44 @@ def btnGreenZManFeedThreeDoorClickReset():
 # LINE B FUNCTION - .bfunc
 # ================================================================================
 
+class MaterialModeSelectorFeederB:
+    def __init__(self):
+        self.not_full_sensor = not bool(globals()['J00135'] and globals()['J00136'] and globals()['J00137'] and globals()['J00138'] and globals()['J00139'])
+
+    def putih(self):
+        return bool(self.not_full_sensor and not globals()['J00140'] and globals()['V0140'] == 32768 and (globals()['I00021'] and not globals()['I00020']))
+
+    def warna1(self):
+        return bool(self.not_full_sensor and not globals()['J00141'] and globals()['V0140'] == 16384 and (globals()['I00023'] and not globals()['I00022']))
+
+    def warna2(self):
+        return bool(self.not_full_sensor and not globals()['J00142'] and globals()['V0140'] == 8192 and (globals()['I00023'] and not globals()['I00022']))
+
+    def warna3(self):
+        return bool(self.not_full_sensor and not globals()['J00143'] and globals()['V0140'] == 4096 and (globals()['I00023'] and not globals()['I00022']))
+
+    def reset(self):
+        return not bool(self.putih or self.warna1 or self.warna2 or self.warna3)
+
+class ProductModeSelectorHopperB:
+    def __init__(self):
+        self.not_full_sensor = not bool(globals()['J00144'] and globals()['J00145'])
+
+    def putih(self):
+        return bool(self.not_full_sensor and globals()['V0141'] == 2048)
+
+    def warna(self):
+        return bool(self.not_full_sensor and globals()['V0141'] == 1024)
+
+    def reset(self):
+        return not bool(self.putih or self.warna)
+
 def cmdBtnFeederBPutih():
+    globals()['V0140'] = 32768
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0144': 32768
+            'V0140': globals()['V0140']
         }})
     # btnAutoFeedPutih.configure(fg_color="lime", text_color="black")
     # btnAutoFeedWarna1.configure(fg_color="pink", text_color="white")
@@ -3993,10 +4244,11 @@ def cmdBtnFeederBPutih():
     showAutoBesarB2()
 
 def cmdBtnFeederBWarna1():
+    globals()['V0140'] = 16384
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0144': 16384
+            'V0140': globals()['V0140']
         }})
     # btnAutoFeedPutih.configure(fg_color="light green", text_color="white")
     # btnAutoFeedWarna1.configure(fg_color="red", text_color="black")
@@ -4005,10 +4257,11 @@ def cmdBtnFeederBWarna1():
     showAutoBesarB2()
 
 def cmdBtnFeederBWarna2():
+    globals()['V0140'] = 8192
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0144': 8192
+            'V0140': globals()['V0140']
         }})
     # btnAutoFeedPutih.configure(fg_color="light green", text_color="white")
     # btnAutoFeedWarna1.configure(fg_color="pink", text_color="white")
@@ -4017,10 +4270,11 @@ def cmdBtnFeederBWarna2():
     showAutoBesarB2()
 
 def cmdBtnFeederBWarna3():
+    globals()['V0140'] = 4096
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0144': 4096
+            'V0140': globals()['V0140']
         }})
     # btnAutoFeedPutih.configure(fg_color="light green", text_color="white")
     # btnAutoFeedWarna1.configure(fg_color="pink", text_color="white")
@@ -4029,9 +4283,18 @@ def cmdBtnFeederBWarna3():
     showAutoBesarB2()
 
 def cmdBtnFeederManual():
+    globals()['V0140'] = 0
+    globals()['V0141'] = 0
+    globals()['V0144'] = 0
+    globals()['V0145'] = 0
+    globals()['V0146'] = 0
+    globals()['V0147'] = 0
+    globals()['V0149'] = 0
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
+            'V0140': 0,
+            'V0141': 0,
             'V0144': 0,
             'V0145': 0,
             'V0146': 0,
@@ -4059,31 +4322,35 @@ def cmdBtnFeederManual():
 
 # ----------------------------------
 def cmdBtnHopperBPutih():
+    globals()['V0141'] = 2048
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0145': 2048
+            'V0141': globals()['V0141']
         }})
     # btnAutoHopperPutih.configure(fg_color="lime", text_color="black")
     # btnAutoHopperWarna1.configure(fg_color="pink", text_color="white")
     showAutoBesarB2()
 
 def cmdBtnHopperBWarna():
+    globals()['V0141'] = 1024
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0145': 1024
+            'V0141': globals()['V0141']
         }})
     # btnAutoHopperPutih.configure(fg_color="light green", text_color="white")
     # btnAutoHopperWarna1.configure(fg_color="red", text_color="black")
     showAutoBesarB2()
 
-
 def cmdBtnHopperBManual():
+    globals()['V0145'] = 0
+    globals()['V0141'] = 0
     collection.update_one(
         {'_id': ObjectId(objID)},
         {'$set': {
-            'V0145': 0
+            'V0145': 0,
+            'V0141': 0
         }})
 
 # ----------------------------------
@@ -4102,11 +4369,12 @@ def checkbtnKiriBManMaterMixRotorhold():
     if btnKiriBManMaterMixRotor.winfo_containing(btnKiriBManMaterMixRotor.winfo_pointerx(),
                                                btnKiriBManMaterMixRotor.winfo_pointery()):
         holdbtnKiriBManMaterMixRotor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00001': True
-            }})
+        globals()['J00001'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00001': True
+        #     }})
 
 def btnKiriBManMaterMixRotorClickReset():
     global holdbtnKiriBManMaterMixRotor, loopAllButtonFalse
@@ -4130,11 +4398,12 @@ def checkbtnKananBManMaterMixRotorhold():
     if btnKananBManMaterMixRotor.winfo_containing(btnKananBManMaterMixRotor.winfo_pointerx(),
                                                btnKananBManMaterMixRotor.winfo_pointery()):
         holdbtnKananBManMaterMixRotor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00000': True
-            }})
+        globals()['J00000'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00000': True
+        #     }})
 
 def btnKananBManMaterMixRotorClickReset():
     global holdbtnKananBManMaterMixRotor, loopAllButtonFalse
@@ -4160,11 +4429,12 @@ def checkRedBManMaterMixDoorhold():
     loopAllButtonFalse = False
     if btnRedBManMaterMixDoor.winfo_containing(btnRedBManMaterMixDoor.winfo_pointerx(), btnRedBManMaterMixDoor.winfo_pointery()):
         holdRedBManMaterMixDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00002': True
-            }})
+        globals()['J00002'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00002': True
+        #     }})
         
 
 
@@ -4193,11 +4463,12 @@ def checkGreenBManMaterMixDoorhold():
     if btnGreenBManMaterMixDoor.winfo_containing(btnGreenBManMaterMixDoor.winfo_pointerx(),
                                              btnGreenBManMaterMixDoor.winfo_pointery()):
         holdGreenBManMaterMixDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00003': True
-            }})
+        globals()['J00003'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00003': True
+        #     }})
         
 
 
@@ -4265,11 +4536,12 @@ def checkbtnKananBManMateriVbratorhold():
     if btnKananBManMateriVbrator.winfo_containing(btnKananBManMateriVbrator.winfo_pointerx(),
                                                btnKananBManMateriVbrator.winfo_pointery()):
         holdbtnKananBManMateriVbrator = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00004': True
-            }})
+        globals()['J00004'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00004': True
+        #     }})
 
 def btnKananBManMateriVbratorClickReset():
     global holdbtnKananBManMateriVbrator, loopAllButtonFalse
@@ -4286,18 +4558,6 @@ def btnKananBManMaterMixRotorClick():
     globals()['holdbtnKananBManMaterMixRotor'] = False
     btnKananBManMaterMixRotor.after(hold_time, checkbtnKananBManMaterMixRotorhold)
     btnKananBManMaterMixRotor.configure(image=imgBManMaterMixRotorRight)
-
-def checkbtnKananBManMaterMixRotorhold():
-    global holdbtnKananBManMaterMixRotor, loopAllButtonFalse
-    loopAllButtonFalse = False
-    if btnKananBManMaterMixRotor.winfo_containing(btnKananBManMaterMixRotor.winfo_pointerx(),
-                                               btnKananBManMaterMixRotor.winfo_pointery()):
-        holdbtnKananBManMaterMixRotor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00000': True
-            }})
 
 def btnKananBManMaterMixRotorClickReset():
     global holdbtnKananBManMaterMixRotor, loopAllButtonFalse
@@ -4321,11 +4581,12 @@ def checkbtnKiriBManMatScrewCnvyrhold():
     if btnKiriBManMatScrewCnvyr.winfo_containing(btnKiriBManMatScrewCnvyr.winfo_pointerx(),
                                                btnKiriBManMatScrewCnvyr.winfo_pointery()):
         holdbtnKiriBManMatScrewCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00017': True
-            }})
+        globals()['J00017'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00017': True
+        #     }})
 
 def btnKiriBManMatScrewCnvyrClickReset():
     global holdbtnKiriBManMatScrewCnvyr, loopAllButtonFalse
@@ -4349,11 +4610,12 @@ def checkbtnKananBManMatScrewCnvyrhold():
     if btnKananBManMatScrewCnvyr.winfo_containing(btnKananBManMatScrewCnvyr.winfo_pointerx(),
                                                btnKananBManMatScrewCnvyr.winfo_pointery()):
         holdbtnKananBManMatScrewCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00016': True
-            }})
+        globals()['J00016'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00016': True
+        #     }})
 
 def btnKananBManMatScrewCnvyrClickReset():
     global holdbtnKananBManMatScrewCnvyr, loopAllButtonFalse
@@ -4429,11 +4691,12 @@ def checkbtnKananBManToRotaryCnvyrhold():
     if btnKananBManToRotaryCnvyr.winfo_containing(btnKananBManToRotaryCnvyr.winfo_pointerx(),
                                                btnKananBManToRotaryCnvyr.winfo_pointery()):
         holdbtnKananBManToRotaryCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00005': True
-            }})
+        globals()['J00005'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00005': True
+        #     }})
 
 def btnKananBManToRotaryCnvyrClickReset():
     global holdbtnKananBManToRotaryCnvyr, loopAllButtonFalse
@@ -4500,11 +4763,12 @@ def checkGreenBManToRotaryCnvyr0hold():
     if btnGreenBManToRotaryCnvyr0.winfo_containing(btnGreenBManToRotaryCnvyr0.winfo_pointerx(),
                                                btnGreenBManToRotaryCnvyr0.winfo_pointery()):
         holdGreenBManToRotaryCnvyr0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00007': True
-            }})
+        globals()['J00007'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00007': True
+        #     }})
 
 
 def btnGreenBManToRotaryCnvyr0ClickReset():
@@ -4530,11 +4794,12 @@ def checkGreenBManToRotaryCnvyr1hold():
     if btnGreenBManToRotaryCnvyr1.winfo_containing(btnGreenBManToRotaryCnvyr1.winfo_pointerx(),
                                                btnGreenBManToRotaryCnvyr1.winfo_pointery()):
         holdGreenBManToRotaryCnvyr1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00009': True
-            }})
+        globals()['J00009'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00009': True
+        #     }})
 
 
 def btnGreenBManToRotaryCnvyr1ClickReset():
@@ -4560,11 +4825,12 @@ def checkGreenBManToRotaryCnvyr2hold():
     if btnGreenBManToRotaryCnvyr2.winfo_containing(btnGreenBManToRotaryCnvyr2.winfo_pointerx(),
                                                btnGreenBManToRotaryCnvyr2.winfo_pointery()):
         holdGreenBManToRotaryCnvyr2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00011': True
-            }})
+        globals()['J00011'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00011': True
+        #     }})
 
 
 def btnGreenBManToRotaryCnvyr2ClickReset():
@@ -4591,11 +4857,12 @@ def checkGreenBManToRotaryCnvyr3hold():
     if btnGreenBManToRotaryCnvyr3.winfo_containing(btnGreenBManToRotaryCnvyr3.winfo_pointerx(),
                                                btnGreenBManToRotaryCnvyr3.winfo_pointery()):
         holdGreenBManToRotaryCnvyr3 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00013': True
-            }})
+        globals()['J00013'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00013': True
+        #     }})
 
 
 def btnGreenBManToRotaryCnvyr3ClickReset():
@@ -4621,11 +4888,12 @@ def checkGreenBManToRotaryCnvyr4hold():
     if btnGreenBManToRotaryCnvyr4.winfo_containing(btnGreenBManToRotaryCnvyr4.winfo_pointerx(),
                                                btnGreenBManToRotaryCnvyr4.winfo_pointery()):
         holdGreenBManToRotaryCnvyr4 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00015': True
-            }})
+        globals()['J00015'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00015': True
+        #     }})
 
 
 def btnGreenBManToRotaryCnvyr4ClickReset():
@@ -4650,11 +4918,12 @@ def checkbtnKananBManFrmRtaryCnvyrhold():
     if btnKananBManFrmRtaryCnvyr.winfo_containing(btnKananBManFrmRtaryCnvyr.winfo_pointerx(),
                                                btnKananBManFrmRtaryCnvyr.winfo_pointery()):
         holdbtnKananBManFrmRtaryCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00032': True
-            }})
+        globals()['J00032'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00032': True
+        #     }})
 
 def btnKananBManFrmRtaryCnvyrClickReset():
     global holdbtnKananBManFrmRtaryCnvyr, loopAllButtonFalse
@@ -4721,11 +4990,12 @@ def checkbtnKananBManUpLadderCnvyrhold():
     if btnKananBManUpLadderCnvyr.winfo_containing(btnKananBManUpLadderCnvyr.winfo_pointerx(),
                                                btnKananBManUpLadderCnvyr.winfo_pointery()):
         holdbtnKananBManUpLadderCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00033': True
-            }})
+        globals()['J00033'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00033': True
+        #     }})
 
 def btnKananBManUpLadderCnvyrClickReset():
     global holdbtnKananBManUpLadderCnvyr, loopAllButtonFalse
@@ -4790,11 +5060,12 @@ def checkGreenBManToHopperCnvyr0hold():
     if btnGreenBManToHopperCnvyr0.winfo_containing(btnGreenBManToHopperCnvyr0.winfo_pointerx(),
                                                btnGreenBManToHopperCnvyr0.winfo_pointery()):
         holdGreenBManToHopperCnvyr0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00020': True
-            }})
+        globals()['J00020'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00020': True
+        #     }})
 
 
 def btnGreenBManToHopperCnvyr0ClickReset():
@@ -4821,11 +5092,12 @@ def checkGreenBManToHopperCnvyr1hold():
     if btnGreenBManToHopperCnvyr1.winfo_containing(btnGreenBManToHopperCnvyr1.winfo_pointerx(),
                                                btnGreenBManToHopperCnvyr1.winfo_pointery()):
         holdGreenBManToHopperCnvyr1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00022': True
-            }})
+        globals()['J00022'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00022': True
+        #     }})
 
 
 def btnGreenBManToHopperCnvyr1ClickReset():
@@ -4852,11 +5124,12 @@ def checkGreenBManToHopperCnvyr2hold():
     if btnGreenBManToHopperCnvyr2.winfo_containing(btnGreenBManToHopperCnvyr2.winfo_pointerx(),
                                                btnGreenBManToHopperCnvyr2.winfo_pointery()):
         holdGreenBManToHopperCnvyr2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00024': True
-            }})
+        globals()['J00024'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00024': True
+        #     }})
 
 
 def btnGreenBManToHopperCnvyr2ClickReset():
@@ -4882,11 +5155,12 @@ def checkGreenBManToHopperCnvyr3hold():
     if btnGreenBManToHopperCnvyr3.winfo_containing(btnGreenBManToHopperCnvyr3.winfo_pointerx(),
                                                btnGreenBManToHopperCnvyr3.winfo_pointery()):
         holdGreenBManToHopperCnvyr3 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00026': True
-            }})
+        globals()['J00026'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00026': True
+        #     }})
 
 
 def btnGreenBManToHopperCnvyr3ClickReset():
@@ -4911,11 +5185,12 @@ def checkbtnKananBManToHopperCnvyrhold():
     if btnKananBManToHopperCnvyr.winfo_containing(btnKananBManToHopperCnvyr.winfo_pointerx(),
                                                btnKananBManToHopperCnvyr.winfo_pointery()):
         holdbtnKananBManToHopperCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00018': True
-            }})
+        globals()['J00018'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00018': True
+        #     }})
 
 def btnKananBManToHopperCnvyrClickReset():
     global holdbtnKananBManToHopperCnvyr, loopAllButtonFalse
@@ -4984,11 +5259,12 @@ def checkRedManBTbletHoprDoor0hold():
     if btnRedManBTbletHoprDoor0.winfo_containing(btnRedManBTbletHoprDoor0.winfo_pointerx(),
                                              btnRedManBTbletHoprDoor0.winfo_pointery()):
         holdRedManBTbletHoprDoor0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00027': True
-            }})
+        globals()['J00027'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00027': True
+        #     }})
         
 
 def btnRedManBTbletHoprDoor0ClickReset():
@@ -5016,11 +5292,12 @@ def checkGreenManBTbletHoprDoor0hold():
     if btnGreenManBTbletHoprDoor0.winfo_containing(btnGreenManBTbletHoprDoor0.winfo_pointerx(),
                                                btnGreenManBTbletHoprDoor0.winfo_pointery()):
         holdGreenManBTbletHoprDoor0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00028': True
-            }})
+        globals()['J00028'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00028': True
+        #     }})
         
 
 def btnGreenManBTbletHoprDoor0ClickReset():
@@ -5048,11 +5325,12 @@ def checkRedManBTbletHoprDoor1hold():
     if btnRedManBTbletHoprDoor1.winfo_containing(btnRedManBTbletHoprDoor1.winfo_pointerx(),
                                              btnRedManBTbletHoprDoor1.winfo_pointery()):
         holdRedManBTbletHoprDoor1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00029': True
-            }})
+        globals()['J00029'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00029': True
+        #     }})
         
 
 def btnRedManBTbletHoprDoor1ClickReset():
@@ -5079,11 +5357,12 @@ def checkGreenManBTbletHoprDoor1hold():
     if btnGreenManBTbletHoprDoor1.winfo_containing(btnGreenManBTbletHoprDoor1.winfo_pointerx(),
                                                btnGreenManBTbletHoprDoor1.winfo_pointery()):
         holdGreenManBTbletHoprDoor1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00030': True
-            }})
+        globals()['J00030'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00030': True
+        #     }})
         
 
 def btnGreenManBTbletHoprDoor1ClickReset():
@@ -5108,11 +5387,12 @@ def checkbtnKananBManTbletHoprDoorhold():
     if btnKananBManTbletHoprDoor.winfo_containing(btnKananBManTbletHoprDoor.winfo_pointerx(),
                                                btnKananBManTbletHoprDoor.winfo_pointery()):
         holdbtnKananBManTbletHoprDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00031': True
-            }})
+        globals()['J00031'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00031': True
+        #     }})
 
 def btnKananBManTbletHoprDoorClickReset():
     global holdbtnKananBManTbletHoprDoor, loopAllButtonFalse
@@ -5179,11 +5459,12 @@ def checkbtnKananBManToRncenCnvyrhold():
     if btnKananBManToRncenCnvyr.winfo_containing(btnKananBManToRncenCnvyr.winfo_pointerx(),
                                                btnKananBManToRncenCnvyr.winfo_pointery()):
         holdbtnKananBManToRncenCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00034': True
-            }})
+        globals()['J00034'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00034': True
+        #     }})
 
 def btnKananBManToRncenCnvyrClickReset():
     global holdbtnKananBManToRncenCnvyr, loopAllButtonFalse
@@ -5253,11 +5534,12 @@ def checkGreenBManToRncenCnvyrhold():
     if btnGreenBManToRncenCnvyr.winfo_containing(btnGreenBManToRncenCnvyr.winfo_pointerx(),
                                              btnGreenBManToRncenCnvyr.winfo_pointery()):
         holdGreenBManToRncenCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00036': True
-            }})
+        globals()['J00036'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00036': True
+        #     }})
 
 
 def btnGreenBManToRncenCnvyrClickReset():
@@ -5461,11 +5743,12 @@ def checkbtnKiriCManMaterMixRotorhold():
     if btnKiriCManMaterMixRotor.winfo_containing(btnKiriCManMaterMixRotor.winfo_pointerx(),
                                                btnKiriCManMaterMixRotor.winfo_pointery()):
         holdbtnKiriCManMaterMixRotor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00060': True
-            }})
+        globals()['J00060'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00060': True
+        #     }})
 
 def btnKiriCManMaterMixRotorClickReset():
     global holdbtnKiriCManMaterMixRotor, loopAllButtonFalse
@@ -5489,11 +5772,12 @@ def checkbtnKananCManMaterMixRotorhold():
     if btnKananCManMaterMixRotor.winfo_containing(btnKananCManMaterMixRotor.winfo_pointerx(),
                                                btnKananCManMaterMixRotor.winfo_pointery()):
         holdbtnKananCManMaterMixRotor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00059': True
-            }})
+        globals()['J00059'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00059': True
+        #     }})
 
 def btnKananCManMaterMixRotorClickReset():
     global holdbtnKananCManMaterMixRotor, loopAllButtonFalse
@@ -5568,11 +5852,12 @@ def checkRedCManMaterMixDoorhold():
     loopAllButtonFalse = False
     if btnRedCManMaterMixDoor.winfo_containing(btnRedCManMaterMixDoor.winfo_pointerx(), btnRedCManMaterMixDoor.winfo_pointery()):
         holdRedCManMaterMixDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00061': True
-            }})
+        globals()['J00061'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00061': True
+        #     }})
         
 
 
@@ -5600,11 +5885,12 @@ def checkGreenCManMaterMixDoorhold():
     if btnGreenCManMaterMixDoor.winfo_containing(btnGreenCManMaterMixDoor.winfo_pointerx(),
                                              btnGreenCManMaterMixDoor.winfo_pointery()):
         holdGreenCManMaterMixDoor = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00062': True
-            }})
+        globals()['J00062'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00062': True
+        #     }})
 
 def btnGreenCManMaterMixDoorClickReset():
     global holdGreenCManMaterMixDoor, loopAllButtonFalse
@@ -5628,11 +5914,12 @@ def checkbtnKananCManMateriVbratorhold():
     if btnKananCManMateriVbrator.winfo_containing(btnKananCManMateriVbrator.winfo_pointerx(),
                                                btnKananCManMateriVbrator.winfo_pointery()):
         holdbtnKananCManMateriVbrator = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00080': True
-            }})
+        globals()['J00080'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00080': True
+        #     }})
 
 def btnKananCManMateriVbratorClickReset():
     global holdbtnKananCManMateriVbrator, loopAllButtonFalse
@@ -5699,11 +5986,12 @@ def checkbtnKiriCManMatScrewCnvyrhold():
     if btnKiriCManMatScrewCnvyr.winfo_containing(btnKiriCManMatScrewCnvyr.winfo_pointerx(),
                                                btnKiriCManMatScrewCnvyr.winfo_pointery()):
         holdbtnKiriCManMatScrewCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00082': True
-            }})
+        globals()['J00082'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00082': True
+        #     }})
 
 def btnKiriCManMatScrewCnvyrClickReset():
     global holdbtnKiriCManMatScrewCnvyr, loopAllButtonFalse
@@ -5726,11 +6014,12 @@ def checkbtnKananCManMatScrewCnvyrhold():
     if btnKananCManMatScrewCnvyr.winfo_containing(btnKananCManMatScrewCnvyr.winfo_pointerx(),
                                                btnKananCManMatScrewCnvyr.winfo_pointery()):
         holdbtnKananCManMatScrewCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00081': True
-            }})
+        globals()['J00081'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00081': True
+        #     }})
 
 def btnKananCManMatScrewCnvyrClickReset():
     global holdbtnKananCManMatScrewCnvyr, loopAllButtonFalse
@@ -5804,11 +6093,12 @@ def checkbtnKananCManToRotaryCnvyrhold():
     if btnKananCManToRotaryCnvyr.winfo_containing(btnKananCManToRotaryCnvyr.winfo_pointerx(),
                                                btnKananCManToRotaryCnvyr.winfo_pointery()):
         holdbtnKananCManToRotaryCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00063': True
-            }})
+        globals()['J00063'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00063': True
+        #     }})
 
 def btnKananCManToRotaryCnvyrClickReset():
     global holdbtnKananCManToRotaryCnvyr, loopAllButtonFalse
@@ -5876,11 +6166,12 @@ def checkGreenCManToRotaryCnvyr0hold():
     if btnGreenCManToRotaryCnvyr0.winfo_containing(btnGreenCManToRotaryCnvyr0.winfo_pointerx(),
                                                btnGreenCManToRotaryCnvyr0.winfo_pointery()):
         holdGreenCManToRotaryCnvyr0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00065': True
-            }})
+        globals()['J00065'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00065': True
+        #     }})
 
 
 def btnGreenCManToRotaryCnvyr0ClickReset():
@@ -5906,11 +6197,12 @@ def checkGreenCManToRotaryCnvyr1hold():
     if btnGreenCManToRotaryCnvyr1.winfo_containing(btnGreenCManToRotaryCnvyr1.winfo_pointerx(),
                                                btnGreenCManToRotaryCnvyr1.winfo_pointery()):
         holdGreenCManToRotaryCnvyr1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00067': True
-            }})
+        globals()['J00067'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00067': True
+        #     }})
 
 
 def btnGreenCManToRotaryCnvyr1ClickReset():
@@ -5936,11 +6228,12 @@ def checkGreenCManToRotaryCnvyr2hold():
     if btnGreenCManToRotaryCnvyr2.winfo_containing(btnGreenCManToRotaryCnvyr2.winfo_pointerx(),
                                                btnGreenCManToRotaryCnvyr2.winfo_pointery()):
         holdGreenCManToRotaryCnvyr2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00069': True
-            }})
+        globals()['J00069'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00069': True
+        #     }})
 
 
 def btnGreenCManToRotaryCnvyr2ClickReset():
@@ -5965,11 +6258,12 @@ def checkbtnKananCManFrmRtaryCnvyrhold():
     if btnKananCManFrmRtaryCnvyr.winfo_containing(btnKananCManFrmRtaryCnvyr.winfo_pointerx(),
                                                btnKananCManFrmRtaryCnvyr.winfo_pointery()):
         holdbtnKananCManFrmRtaryCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00083': True
-            }})
+        globals()['J00083'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00083': True
+        #     }})
 
 def btnKananCManFrmRtaryCnvyrClickReset():
     global holdbtnKananCManFrmRtaryCnvyr, loopAllButtonFalse
@@ -6036,11 +6330,12 @@ def checkbtnKananCManUpLadderCnvyrhold():
     if btnKananCManUpLadderCnvyr.winfo_containing(btnKananCManUpLadderCnvyr.winfo_pointerx(),
                                                btnKananCManUpLadderCnvyr.winfo_pointery()):
         holdbtnKananCManUpLadderCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00084': True
-            }})
+        globals()['J00084'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00084': True
+        #     }})
 
 def btnKananCManUpLadderCnvyrClickReset():
     global holdbtnKananCManUpLadderCnvyr, loopAllButtonFalse
@@ -6103,11 +6398,12 @@ def checkbtnKananCManToHopperCnvyrhold():
     if btnKananCManToHopperCnvyr.winfo_containing(btnKananCManToHopperCnvyr.winfo_pointerx(),
                                                btnKananCManToHopperCnvyr.winfo_pointery()):
         holdbtnKananCManToHopperCnvyr = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00085': True
-            }})
+        globals()['J00085'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00085': True
+        #     }})
 
 def btnKananCManToHopperCnvyrClickReset():
     global holdbtnKananCManToHopperCnvyr, loopAllButtonFalse
@@ -6176,11 +6472,12 @@ def checkGreenCManToHopperCnvyr0hold():
     if btnGreenCManToHopperCnvyr0.winfo_containing(btnGreenCManToHopperCnvyr0.winfo_pointerx(),
                                                btnGreenCManToHopperCnvyr0.winfo_pointery()):
         holdGreenCManToHopperCnvyr0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00087': True
-            }})
+        globals()['J00087'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00087': True
+        #     }})
 
 
 def btnGreenCManToHopperCnvyr0ClickReset():
@@ -6207,11 +6504,12 @@ def checkGreenCManToHopperCnvyr1hold():
     if btnGreenCManToHopperCnvyr1.winfo_containing(btnGreenCManToHopperCnvyr1.winfo_pointerx(),
                                                btnGreenCManToHopperCnvyr1.winfo_pointery()):
         holdGreenCManToHopperCnvyr1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00089': True
-            }})
+        globals()['J00089'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00089': True
+        #     }})
 
 
 def btnGreenCManToHopperCnvyr1ClickReset():
@@ -6238,11 +6536,12 @@ def checkGreenCManToHopperCnvyr2hold():
     if btnGreenCManToHopperCnvyr2.winfo_containing(btnGreenCManToHopperCnvyr2.winfo_pointerx(),
                                                btnGreenCManToHopperCnvyr2.winfo_pointery()):
         holdGreenCManToHopperCnvyr2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00091': True
-            }})
+        globals()['J00091'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00091': True
+        #     }})
 
 
 def btnGreenCManToHopperCnvyr2ClickReset():
@@ -6268,11 +6567,12 @@ def checkGreenCManToHopperCnvyr3hold():
     loopAllButtonFalse = False
     if btnGreenCManToHopperCnvyr3.winfo_containing(btnGreenCManToHopperCnvyr3.winfo_pointerx(),
                                                btnGreenCManToHopperCnvyr3.winfo_pointery()):
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00093': True
-            }})
+        globals()['J00093'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00093': True
+        #     }})
         holdGreenCManToHopperCnvyr3 = True
 
 
@@ -6300,11 +6600,12 @@ def checkGreenCManToHopperCnvyr4hold():
     if btnGreenCManToHopperCnvyr4.winfo_containing(btnGreenCManToHopperCnvyr4.winfo_pointerx(),
                                                btnGreenCManToHopperCnvyr4.winfo_pointery()):
         holdGreenCManToHopperCnvyr4 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00095': True
-            }})
+        globals()['J00095'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00095': True
+        #     }})
 
 
 def btnGreenCManToHopperCnvyr4ClickReset():
@@ -6331,11 +6632,12 @@ def checkRedManCTbletHoprDoor0hold():
     if btnRedManCTbletHoprDoor0.winfo_containing(btnRedManCTbletHoprDoor0.winfo_pointerx(),
                                              btnRedManCTbletHoprDoor0.winfo_pointery()):
         holdRedManCTbletHoprDoor0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00070': True
-            }})
+        globals()['J00070'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00070': True
+        #     }})
         
 
 def btnRedManCTbletHoprDoor0ClickReset():
@@ -6363,11 +6665,12 @@ def checkGreenManCTbletHoprDoor0hold():
     if btnGreenManCTbletHoprDoor0.winfo_containing(btnGreenManCTbletHoprDoor0.winfo_pointerx(),
                                                btnGreenManCTbletHoprDoor0.winfo_pointery()):
         holdGreenManCTbletHoprDoor0 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00071': True
-            }})
+        globals()['J00071'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00071': True
+        #     }})
         
 
 def btnGreenManCTbletHoprDoor0ClickReset():
@@ -6395,11 +6698,12 @@ def checkRedManCTbletHoprDoor1hold():
     if btnRedManCTbletHoprDoor1.winfo_containing(btnRedManCTbletHoprDoor1.winfo_pointerx(),
                                              btnRedManCTbletHoprDoor1.winfo_pointery()):
         holdRedManCTbletHoprDoor1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00072': True
-            }})
+        globals()['J00072'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00072': True
+        #     }})
         
 
 def btnRedManCTbletHoprDoor1ClickReset():
@@ -6426,11 +6730,12 @@ def checkGreenManCTbletHoprDoor1hold():
     if btnGreenManCTbletHoprDoor1.winfo_containing(btnGreenManCTbletHoprDoor1.winfo_pointerx(),
                                                btnGreenManCTbletHoprDoor1.winfo_pointery()):
         holdGreenManCTbletHoprDoor1 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00073': True
-            }})
+        globals()['J00073'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00073': True
+        #     }})
         
 
 def btnGreenManCTbletHoprDoor1ClickReset():
@@ -6457,11 +6762,12 @@ def checkRedManCTbletHoprDoor2hold():
     if btnRedManCTbletHoprDoor2.winfo_containing(btnRedManCTbletHoprDoor2.winfo_pointerx(),
                                              btnRedManCTbletHoprDoor2.winfo_pointery()):
         holdRedManCTbletHoprDoor2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00074': True
-            }})
+        globals()['J00074'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00074': True
+        #     }})
         
 
 def btnRedManCTbletHoprDoor2ClickReset():
@@ -6488,11 +6794,12 @@ def checkGreenManCTbletHoprDoor2hold():
     if btnGreenManCTbletHoprDoor2.winfo_containing(btnGreenManCTbletHoprDoor2.winfo_pointerx(),
                                                btnGreenManCTbletHoprDoor2.winfo_pointery()):
         holdGreenManCTbletHoprDoor2 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00075': True
-            }})
+        globals()['J00075'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00075': True
+        #     }})
         
 
 def btnGreenManCTbletHoprDoor2ClickReset():
@@ -6519,11 +6826,12 @@ def checkRedManCTbletHoprDoor3hold():
     if btnRedManCTbletHoprDoor3.winfo_containing(btnRedManCTbletHoprDoor3.winfo_pointerx(),
                                              btnRedManCTbletHoprDoor3.winfo_pointery()):
         holdRedManCTbletHoprDoor3 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00076': True
-            }})
+        globals()['J00076'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00076': True
+        #     }})
         
 
 def btnRedManCTbletHoprDoor3ClickReset():
@@ -6550,11 +6858,12 @@ def checkGreenManCTbletHoprDoor3hold():
     if btnGreenManCTbletHoprDoor3.winfo_containing(btnGreenManCTbletHoprDoor3.winfo_pointerx(),
                                                btnGreenManCTbletHoprDoor3.winfo_pointery()):
         holdGreenManCTbletHoprDoor3 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00077': True
-            }})
+        globals()['J00077'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00077': True
+        #     }})
         
 
 def btnGreenManCTbletHoprDoor3ClickReset():
@@ -6581,11 +6890,12 @@ def checkRedManCTbletHoprDoor4hold():
     if btnRedManCTbletHoprDoor4.winfo_containing(btnRedManCTbletHoprDoor4.winfo_pointerx(),
                                              btnRedManCTbletHoprDoor4.winfo_pointery()):
         holdRedManCTbletHoprDoor4 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00078': True
-            }})
+        globals()['J00078'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00078': True
+        #     }})
         
 
 def btnRedManCTbletHoprDoor4ClickReset():
@@ -6612,11 +6922,12 @@ def checkGreenManCTbletHoprDoor4hold():
     if btnGreenManCTbletHoprDoor4.winfo_containing(btnGreenManCTbletHoprDoor4.winfo_pointerx(),
                                                btnGreenManCTbletHoprDoor4.winfo_pointery()):
         holdGreenManCTbletHoprDoor4 = True
-        collection.update_one(
-            {'_id': ObjectId(objID)},
-            {'$set': {
-                'J00079': True
-            }})
+        globals()['J00079'] = True
+        # collection.update_one(
+        #     {'_id': ObjectId(objID)},
+        #     {'$set': {
+        #         'J00079': True
+        #     }})
         
 
 def btnGreenManCTbletHoprDoor4ClickReset():
